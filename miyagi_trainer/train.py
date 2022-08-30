@@ -146,10 +146,10 @@ def train_model(model,
             epoch_acc = 100 * running_corrects.double() / dataset_sizes[phase]
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.2f}%')
 
-            if phase == "val" and epoch_acc > best_acc:
-                wandb.run.summary["best_val_acc"] = epoch_acc
-
             if track_experiment:
+                if phase == "val" and epoch_acc > best_acc:
+                    wandb.run.summary["best_val_acc"] = epoch_acc
+
                 epoch_log.update({
                     f"{phase}_loss": epoch_loss,
                     f"{phase}_acc": epoch_acc,
@@ -175,7 +175,8 @@ def train_model(model,
 
 
     time_elapsed = time.time() - since
-    wandb.run.summary["total_duration"] = time_elapsed
+    if track_experiment:
+        wandb.run.summary["total_duration"] = time_elapsed
 
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best val acc: {best_acc:4f}')
@@ -243,10 +244,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_dataloader_workers", default=8) # recomends to be 4 x #GPU
 
     parser.add_argument("--batch_size", default=64)
-    parser.add_argument("--n_epochs", default=5)
+    parser.add_argument("--n_epochs", default=30)
 
     parser.add_argument('--track_experiment', action=argparse.BooleanOptionalAction)
-    parser.add_argument("--experiment_group", default="resnet_experiments")
+    parser.add_argument("--experiment_group", default="miyagi-pytorch-trainer")
     parser.add_argument("--experiment_name", default="")
     parser.add_argument("--track_images", action=argparse.BooleanOptionalAction)
     parser.add_argument("--wandb_user")
