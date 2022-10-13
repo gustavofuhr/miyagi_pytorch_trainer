@@ -121,7 +121,7 @@ We don't use an specific lib for augmentation, but we support some nice ones. Yo
 
 We have a few other options that you can set as well. For a full list just run `python miyagi_trainer/train.py --help`. Here's the most important ones:
 
-- `weight_decay` (default `1e-4`): weight decay is nowdays consider to be a good idea almost always. We set the default, but you could try to find the sweet spot for your problem, you can check [this paper](https://arxiv.org/pdf/2203.14197.pdf) to see for yourself if that is worth doing it.
+- `weight_decay` (default `1e-4`): weight decay is nowadays consider to be a good idea almost always. We set the default, but you could try to find the sweet spot for your problem, you can check [this paper](https://arxiv.org/pdf/2203.14197.pdf) to see for yourself if that is worth doing it.
 - `optimizer` (default `sgd`): the optimizer for training, you can also set to `adam` and `adamp`. I usually let it to SGD because we use `CosineAnnealingWarmRestarts` as the LR scheduler by default and I had some problems using other optimizers with that.
 - Others: `batch_size` (default `64`), `n_epochs` (default `30`).
 
@@ -147,6 +147,11 @@ Almost every time that you're training a model, you want to try out a bunch of d
 
 To define the sweeps, you should create an yaml file and run the following command:
 ```
+wandb sweep sweeps/cifar10_full_sweep.yaml
+wandb: Creating sweep from: sweeps/cifar10_full_sweep.yaml
+wandb: Created sweep with ID: wj792riv
+wandb: View sweep at: https://wandb.ai/gfuhr2/miyagi_pytorch_trainer/sweeps/wj792riv
+wandb: Run sweep agent with: wandb agent gfuhr2/miyagi_pytorch_trainer/wj792riv
 
 ```
 

@@ -1,0 +1,30 @@
+command:
+- ${env}
+- python
+- ${program}
+- ${args}
+- --wandb_sweep_activated
+- --track_experiment
+name: cifar10_full_sweep
+program: miyagi_trainer/train.py
+method: grid
+metric:
+  name: best_val_acc
+  goal: maximize
+parameters:
+  train_datasets:
+    values: ["CIFAR10"]
+  val_datasets:
+    values: ["CIFAR10"]
+  optimizer:
+    values: [sgd]
+  backbone:
+    values: ["mobilenetv3_large_100", "efficientnet_b0", "resnet50", "densenet_121"]
+  augmentation:
+    values: ["simple", "rand-m9-n3-mstd0.5", "rand-mstd1-w0", "random_erase"]
+  resize_size:
+    values: [128, 224, 300, 400]
+  weight_decay:
+    values: [1e-5, 1e-4, 1e-3]
+  n_epochs:
+    values: [20]
