@@ -11,11 +11,11 @@ def get_model(model_name, n_classes, pretrained = True, freeze_all_but_last = Fa
 
     # always priorize timm if possible
     if model_name in timm.list_models("*"):
-        print("Getting model from timm")
+        # print("Getting model from timm")
         model = timm.create_model(model_name, pretrained, num_classes=n_classes)
         if freeze_all_but_last: _freeze_all(model)
     else:
-        print("Getting model from torchvision")
+        # print("Getting model from torchvision")
         model = getattr(models, model_name)(pretrained=pretrained)
         if freeze_all_but_last: _freeze_all(model)
 

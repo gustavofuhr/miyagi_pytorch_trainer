@@ -145,25 +145,36 @@ there is all the original configuration used for it.
 
 Almost every time that you're training a model, you want to try out a bunch of different models, configs, hyperparameters. Wandb sweeps can help you a lot for that and it's quite simple to use. Basically, you need to register a sweep, which defines which options/intervals you want to explore. This info is kept in the cloud and then you can open multiples machines (agents) to run this "queue" of experiments in parallel.
 
-To define the sweeps, you should create an yaml file and run the following command:
+There is an example in the `sweeps/` folder, called `cifar10_full_sweep.yaml` which tests different options, such as backbones, augmentations, weight decay values, etc. To run this sweep you use the following command:
+
 ```
-wandb sweep sweeps/cifar10_full_sweep.yaml
+$ wandb sweep sweeps/cifar10_full_sweep.yaml
+
 wandb: Creating sweep from: sweeps/cifar10_full_sweep.yaml
-wandb: Created sweep with ID: wj792riv
-wandb: View sweep at: https://wandb.ai/gfuhr2/miyagi_pytorch_trainer/sweeps/wj792riv
-wandb: Run sweep agent with: wandb agent gfuhr2/miyagi_pytorch_trainer/wj792riv
+wandb: Created sweep with ID: xxxxxxx
+wandb: View sweep at: https://wandb.ai/wandb_user/miyagi_pytorch_trainer/sweeps/xxxxxx
+wandb: Run sweep agent with: wandb agent wandb_user/miyagi_pytorch_trainer/xxxxxx
 
 ```
 
-There is some examples in the `sweeps/` folder. Once you done this, you need to run agents in the
-machines that you had setup:
+Once you done this, you need to run agents in the machines that you had previously setup:
+
 
 ```
-
+wandb agent wandb_user/miyagi_pytorch_trainer/xxxxxx
 ```
 
+This example will run a train for all the options (grid search) that is specified in the yaml file. That should take a couple of days, but you end up with a very cool experimental set:
 
-[comment]: <> (# Samples)
+![Isn't that beautiful?](sweeps_cifar10.png)
+
+## To-do
+
+- export pytorch models (maybe onnx);
+- resume training checkpoint;
+
+Anything else, open an issue.
+
 
 
 

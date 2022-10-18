@@ -103,9 +103,7 @@ class DatasetJoin(torch.utils.data.ConcatDataset):
                 sub_class_to_idx = {key: ds.class_to_idx[key] for key in new_classes}
                 join_class_to_idx.update(sub_class_to_idx)
                 ds.target_transform = lambda y: target_mapping.get(y, y)
-                print("transform in dataset: ", target_mapping)
             this_ds_counts = Counter(ds.targets)
-            print("this_ds_counts", this_ds_counts)
             # TODO: this class_sample_count is not taking into account the target_mapping
             class_sample_count.update(this_ds_counts)
             self.all_targets.extend(ds.targets)
@@ -114,7 +112,6 @@ class DatasetJoin(torch.utils.data.ConcatDataset):
         self.all_targets = torch.tensor(self.all_targets)
 
         self.class_sample_count = class_sample_count
-        print("final count", self.class_sample_count)
 
         self.join_class_to_idx = join_class_to_idx
         s = set().union(*[ds.classes for ds in self.datasets])
