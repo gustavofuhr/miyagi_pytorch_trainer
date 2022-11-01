@@ -1,6 +1,7 @@
 import os
 import argparse
 import time
+import datetime
 import copy
 from collections import deque
 
@@ -29,7 +30,8 @@ def train_model(model,
                 n_epochs = 100,
                 metric_eer = False,
                 track_experiment = False,
-                track_images = False):
+                track_images = False, 
+                save_model = False):
     """
     Train a model given model params and dataset loaders
     """
@@ -146,6 +148,21 @@ def train_model(model,
             epoch_acc = 100 * running_corrects.double() / dataset_sizes[phase]
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.2f}%')
 
+            if save_model:
+                save_curr_model = (not metric_eer and epoch_acc > best_acc) or \
+                                  (metric_eer and epoch_eer < best_eer)
+                if save_curr_model:
+                    model_folder = wandb.run.name if track_experiment else \
+                                   datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+                    if not os.path.exists(model_folder):
+                        os.mkdir(model_folder)
+                    torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'loss': loss,
+                            }, os.path.join(model_folder, "best_model_save.pth"))
+                    
             if track_experiment:
                 if phase == "val" and epoch_acc > best_acc:
                     wandb.run.summary["best_val_acc"] = epoch_acc
@@ -224,7 +241,8 @@ def train(args):
             wandb.init(project=args.experiment_group, name=args.experiment_name, entity=args.wandb_user, config=args)
 
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
-                    int(args.n_epochs), args.metric_eer, args.track_experiment, args.track_images)
+                    int(args.n_epochs), args.metric_eer, args.track_experiment, args.track_images, 
+                    args.save_model)
 
 
 if __name__ == "__main__":
@@ -259,6 +277,9 @@ if __name__ == "__main__":
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
     parser.add_argument("--weight_decay", type=float, default=1e-4)
+
+    # options for model saving
+    parser.add_argument("--save_model", action=argparse.BooleanOptionalAction)
 
     # options for liveness
     parser.add_argument("--metric_eer", action=argparse.BooleanOptionalAction)
