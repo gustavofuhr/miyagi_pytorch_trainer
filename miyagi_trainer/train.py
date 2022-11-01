@@ -149,6 +149,7 @@ def train_model(model,
             if track_experiment:
                 if phase == "val" and epoch_acc > best_acc:
                     wandb.run.summary["best_val_acc"] = epoch_acc
+                    best_acc = epoch_acc
 
                 epoch_log.update({
                     f"{phase}_loss": epoch_loss,
@@ -160,6 +161,7 @@ def train_model(model,
                     })
                     if phase == "val" and epoch_eer < best_eer:
                         wandb.run.summary["best_val_eer"] = epoch_eer
+                        best_eer = epoch_eer
 
                 if track_images and phase == "train":
                     epoch_log.update({"last_train_batch" : wandb.Image(inputs)})
