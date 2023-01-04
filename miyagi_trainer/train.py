@@ -148,6 +148,12 @@ def train_model(model,
             epoch_acc = 100 * running_corrects.double() / dataset_sizes[phase]
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.2f}%')
 
+            if phase == "val":
+                if epoch_acc > best_acc:
+                    best_acc = epoch_acc
+                if metric_eer and epoch_eer < best_eer:
+                    best_eer = epoch_eer
+
             if save_best_model:
                 save_curr_model = (not metric_eer and epoch_acc > best_acc) or \
                                   (metric_eer and epoch_eer < best_eer)
@@ -164,8 +170,8 @@ def train_model(model,
                             }, os.path.join(model_folder, "best_saved_model.pt"))
                     
             if track_experiment:
-                if phase == "val" and epoch_acc > best_acc:
-                    wandb.run.summary["best_val_acc"] = epoch_acc
+                if phase == "val":
+                    wandb.run.summary["best_val_acc"] = best_acc
 
                 epoch_log.update({
                     f"{phase}_loss": epoch_loss,
@@ -175,8 +181,8 @@ def train_model(model,
                     epoch_log.update({
                         f"{phase}_eer": epoch_eer
                     })
-                    if phase == "val" and epoch_eer < best_eer:
-                        wandb.run.summary["best_val_eer"] = epoch_eer
+                    if phase == "val":
+                        wandb.run.summary["best_val_eer"] = best_eer
 
                 if track_images and phase == "train":
                     epoch_log.update({"last_train_batch" : wandb.Image(inputs)})
