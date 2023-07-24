@@ -233,8 +233,6 @@ def train(args):
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
                                         not args.no_transfer_learning, args.freeze_all_but_last)
     print(f"model {args.backbone}")
-    if args.weights:
-        model.load_state_dict(torch.load(args.weights))
     # print(model)
 
     optimizer = optimizers.get_optimizer(model, args.optimizer, args.weight_decay)
