@@ -224,14 +224,17 @@ def train(args):
     }
 
     train_loader, val_loader = dataloaders.get_dataset_loaders(in_datasets_names,
-                                                                transformers,
-                                                                int(args.batch_size),
-                                                                int(args.num_dataloader_workers),
-                                                                args.balanced_weights)
+                                                               transformers,
+                                                               int(args.batch_size),
+                                                               int(args.num_dataloader_workers),
+                                                               args.balanced_weights,
+                                                               args.multiple_balanced_datasets)
 
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
                                         not args.no_transfer_learning, args.freeze_all_but_last)
     print(f"model {args.backbone}")
+    if args.weights:
+        model.load_state_dict(torch.load(args.weights))
     # print(model)
 
     optimizer = optimizers.get_optimizer(model, args.optimizer, args.weight_decay)
@@ -263,6 +266,9 @@ if __name__ == "__main__":
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--val_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--balanced_weights", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--multiple_balanced_datasets", action=argparse.BooleanOptionalAction,
+        help="Dataset path contains multiple datasets that will be combined, each one "
+        "having equal weight")
 
     parser.add_argument("--resize_size", default=None)
     parser.add_argument("--num_dataloader_workers", default=8) # recomends to be 4 x #GPU
@@ -278,7 +284,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_sweep_activated", action=argparse.BooleanOptionalAction)
 
     parser.add_argument("--augmentation", type=str, default="simple",
-                             choices=["noaug", "simple", "rand-m9-n3-mstd0.5", "rand-mstd1-w0", "random_erase"])
+        choices=["noaug", "simple", "rand-m9-n3-mstd0.5", "rand-mstd1-w0", "random_erase"])
 
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
