@@ -228,7 +228,7 @@ def train(args):
                                                                int(args.batch_size),
                                                                int(args.num_dataloader_workers),
                                                                args.balanced_weights,
-                                                               args.multiple_balanced_datasets)
+                                                               args.multiple_datasets_temperature)
 
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
                                         not args.no_transfer_learning, args.freeze_all_but_last)
@@ -264,9 +264,9 @@ if __name__ == "__main__":
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--val_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--balanced_weights", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--multiple_balanced_datasets", action=argparse.BooleanOptionalAction,
+    parser.add_argument("--multiple_datasets_temperature", type=float, required=False,
         help="Dataset path contains multiple datasets that will be combined, each one "
-        "having equal weight")
+        "having a weight given by a softmax of the datasets size with this temperature.")
 
     parser.add_argument("--resize_size", default=None)
     parser.add_argument("--num_dataloader_workers", default=8) # recomends to be 4 x #GPU
