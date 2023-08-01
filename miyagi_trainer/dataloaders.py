@@ -11,7 +11,7 @@ from datasets import CUSTOM_DATASETS
 
 def _get_pytorch_dataloders(
         dataset, batch_size, num_workers, balanced_weights=False,
-        multiple_balanced_datasets=False, balance_datasets_temperature=0.2):
+        multiple_datasets_temperature=0.0):
     
     if balanced_weights:
         class_sample_count = torch.tensor([*dataset.class_sample_count.values()])
@@ -26,12 +26,12 @@ def _get_pytorch_dataloders(
             dataset=dataset, batch_size=batch_size, num_workers=num_workers, 
             pin_memory=True, sampler=sampler)
 
-    elif multiple_balanced_datasets:
+    elif multiple_datasets_temperature:
         samples_weight_list = []
         num_datasets = len(dataset.dataset_idx)
         datasets_sizes = [sum(dataset.ds_class_sample_count[idx].values())
                           for idx in range(num_datasets)]
-        t = balance_datasets_temperature # temperature
+        t = multiple_datasets_temperature # temperature
         sizes_tensor = torch.tensor(datasets_sizes).float()
         weights = torch.softmax(sizes_tensor/(max(datasets_sizes)*t), dim=0)
         dataset_weights = weights.numpy(force=True)
@@ -138,7 +138,7 @@ def get_dataset_loaders(dataset_names,
                         batch_size = 32,
                         num_workers = 4,
                         balanced_weights = False,
-                        multiple_balanced_datasets = False):
+                        multiple_datasets_temperature = 0.2):
 
     """
     Expecting dataset_names and transforms to be dict with "train" and "val" keys
@@ -160,10 +160,14 @@ def get_dataset_loaders(dataset_names,
 
         # TODO: https://stackoverflow.com/questions/71173583/concat-datasets-in-pytorch
         combined_datasets[s] = DatasetJoin(split_datasets)
-        data_loaders[s] = _get_pytorch_dataloders(
-            combined_datasets[s], batch_size, num_workers,
-            balanced_weights and s=='train', # only for train
-            multiple_balanced_datasets and s=='train') # only for train
+        if s == 'train':
+            data_loaders[s] = _get_pytorch_dataloders(
+                combined_datasets[s], batch_size, num_workers,
+                balanced_weights,
+                multiple_datasets_temperature)
+        else:
+            data_loaders[s] = _get_pytorch_dataloders(
+                combined_datasets[s], batch_size, num_workers)
 
     return data_loaders["train"], data_loaders["val"]
 
