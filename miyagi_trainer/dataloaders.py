@@ -133,6 +133,38 @@ class DatasetJoin(torch.utils.data.ConcatDataset):
         self.classes = list(s)
 
 
+def get_loader(split,
+               dataset_names,
+               transform,
+               batch_size = 32,
+               num_workers = 4,
+               balanced_weights = False,
+               multiple_datasets_temperature = 0.2):
+    split_datasets = []
+    combined_datasets = {}
+    for ds_name in dataset_names:
+        if ds_name in dir(torchvision.datasets):
+            this_dataset = _get_pytorch_dataset(ds_name, split, transform)
+        elif ds_name in CUSTOM_DATASETS.keys():
+            this_dataset = _get_image_folder_dataset(ds_name, split, transform)
+        else:
+            raise ValueError(f'Invalid dataset: {ds_name}')
+
+        split_datasets.append(this_dataset)
+
+    # TODO: https://stackoverflow.com/questions/71173583/concat-datasets-in-pytorch
+    combined_datasets = DatasetJoin(split_datasets)
+    if split == 'train':
+        data_loader = _get_pytorch_dataloders(
+            combined_datasets, batch_size, num_workers,
+            balanced_weights,
+            multiple_datasets_temperature)
+    else:
+        data_loader = _get_pytorch_dataloders(
+            combined_datasets, batch_size, num_workers)
+
+    return data_loader
+
 def get_dataset_loaders(dataset_names,
                         transforms,
                         batch_size = 32,
@@ -144,30 +176,12 @@ def get_dataset_loaders(dataset_names,
     Expecting dataset_names and transforms to be dict with "train" and "val" keys
     """
     splits = ["train", "val"]
-    combined_datasets = {}
     data_loaders = {}
     for s in splits:
-        split_datasets = []
-        for ds_name in dataset_names[s]:
-            if ds_name in dir(torchvision.datasets):
-                this_dataset = _get_pytorch_dataset(ds_name, s, transforms[s])
-            elif ds_name in CUSTOM_DATASETS.keys():
-                this_dataset = _get_image_folder_dataset(ds_name, s, transforms[s])
-            else:
-                raise ValueError(f'Invalid dataset: {ds_name}')
-
-            split_datasets.append(this_dataset)
-
-        # TODO: https://stackoverflow.com/questions/71173583/concat-datasets-in-pytorch
-        combined_datasets[s] = DatasetJoin(split_datasets)
-        if s == 'train':
-            data_loaders[s] = _get_pytorch_dataloders(
-                combined_datasets[s], batch_size, num_workers,
-                balanced_weights,
-                multiple_datasets_temperature)
-        else:
-            data_loaders[s] = _get_pytorch_dataloders(
-                combined_datasets[s], batch_size, num_workers)
+        data_loaders[s] = get_loader(
+            s, dataset_names[s], transforms[s],
+            batch_size, num_workers, balanced_weights,
+            multiple_datasets_temperature)
 
     return data_loaders["train"], data_loaders["val"]
 
