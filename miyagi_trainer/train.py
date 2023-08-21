@@ -3,11 +3,8 @@ import argparse
 import time
 import datetime
 import copy
-from collections import deque
 
-import numpy as np
 import torch
-import torch.nn as nn
 from tqdm import tqdm
 import wandb
 
@@ -71,8 +68,6 @@ def train_model(model,
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
     num_epochs = n_epochs
 
-    start = time.time()
-
 
     for epoch in range(num_epochs):
         start_epoch = time.time()
@@ -94,9 +89,6 @@ def train_model(model,
 
             running_labels = torch.Tensor()
             running_outputs = torch.Tensor()
-
-            #wrong_epoch_images = deque(maxlen=32)
-            #wrong_epoch_attr = deque(maxlen=32)
 
             # Iterate over data.
             for batch_idx, (inputs, labels) in enumerate(tqdm(dataloaders[phase])):
@@ -129,11 +121,6 @@ def train_model(model,
                 if metric_eer:
                     running_outputs = torch.cat((running_outputs, outputs.detach().cpu()))
 
-                #if phase == "train":
-                #    wrong_epoch_images.extend([x for x in inputs[preds!=labels]])
-                    #if track_images:
-                    #    wrong_epoch_attr.extend([(labels[i], preds[i])\
-                    #                                for i in (preds!=labels).nonzero().flatten()])
 
             if phase == 'train':
                 scheduler.step()
@@ -160,8 +147,7 @@ def train_model(model,
                 if save_curr_model:
                     model_folder = wandb.run.name if track_experiment else \
                                    datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-                    if not os.path.exists(model_folder):
-                        os.mkdir(model_folder)
+                    os.makedirs(model_folder, exist_ok=True)
                     torch.save({
                             'epoch': epoch,
                             'model_state_dict': model.state_dict(),
@@ -259,6 +245,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--no_transfer_learning", action=argparse.BooleanOptionalAction)
     parser.add_argument("--freeze_all_but_last", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--weights", type=str)
 
     # {phase} datasets are hope to have {phase}-named folders inside them
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
@@ -287,6 +274,7 @@ if __name__ == "__main__":
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
     parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--t_mult", type=int, default=2)
 
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction)

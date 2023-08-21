@@ -11,5 +11,7 @@ def get_optimizer(model, optimizer_arg, weight_decay = 1e-4):
         optimizer = torch.optim.Adam(model.parameters(), lr=0.05, weight_decay=weight_decay)
     elif optimizer_arg == "sgd":
         optimizer = torch.optim.SGD(model.parameters(), lr=0.01, weight_decay=weight_decay)
+    else:
+        raise ValueError(f"Invalid optimizer_arg: {optimizer_arg}")
 
     return optimizer
