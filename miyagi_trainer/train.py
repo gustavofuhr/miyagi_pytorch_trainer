@@ -3,11 +3,8 @@ import argparse
 import time
 import datetime
 import copy
-from collections import deque
 
-import numpy as np
 import torch
-import torch.nn as nn
 from tqdm import tqdm
 import wandb
 
@@ -71,8 +68,6 @@ def train_model(model,
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
     num_epochs = n_epochs
 
-    start = time.time()
-
 
     for epoch in range(num_epochs):
         start_epoch = time.time()
@@ -94,9 +89,6 @@ def train_model(model,
 
             running_labels = torch.Tensor()
             running_outputs = torch.Tensor()
-
-            #wrong_epoch_images = deque(maxlen=32)
-            #wrong_epoch_attr = deque(maxlen=32)
 
             # Iterate over data.
             for batch_idx, (inputs, labels) in enumerate(tqdm(dataloaders[phase])):
@@ -129,11 +121,6 @@ def train_model(model,
                 if metric_eer:
                     running_outputs = torch.cat((running_outputs, outputs.detach().cpu()))
 
-                #if phase == "train":
-                #    wrong_epoch_images.extend([x for x in inputs[preds!=labels]])
-                    #if track_images:
-                    #    wrong_epoch_attr.extend([(labels[i], preds[i])\
-                    #                                for i in (preds!=labels).nonzero().flatten()])
 
             if phase == 'train':
                 scheduler.step()
@@ -160,8 +147,7 @@ def train_model(model,
                 if save_curr_model:
                     model_folder = wandb.run.name if track_experiment else \
                                    datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-                    if not os.path.exists(model_folder):
-                        os.mkdir(model_folder)
+                    os.makedirs(model_folder, exist_ok=True)
                     torch.save({
                             'epoch': epoch,
                             'model_state_dict': model.state_dict(),
@@ -224,10 +210,11 @@ def train(args):
     }
 
     train_loader, val_loader = dataloaders.get_dataset_loaders(in_datasets_names,
-                                                                transformers,
-                                                                int(args.batch_size),
-                                                                int(args.num_dataloader_workers),
-                                                                args.balanced_weights)
+                                                               transformers,
+                                                               int(args.batch_size),
+                                                               int(args.num_dataloader_workers),
+                                                               args.balanced_weights,
+                                                               args.multiple_datasets_temperature)
 
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
                                         not args.no_transfer_learning, args.freeze_all_but_last)
@@ -258,11 +245,15 @@ if __name__ == "__main__":
 
     parser.add_argument("--no_transfer_learning", action=argparse.BooleanOptionalAction)
     parser.add_argument("--freeze_all_but_last", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--weights", type=str)
 
     # {phase} datasets are hope to have {phase}-named folders inside them
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--val_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--balanced_weights", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--multiple_datasets_temperature", type=float, required=False,
+        help="Dataset path contains multiple datasets that will be combined, each one "
+        "having a weight given by a softmax of the datasets size with this temperature.")
 
     parser.add_argument("--resize_size", default=None)
     parser.add_argument("--num_dataloader_workers", default=8) # recomends to be 4 x #GPU
@@ -278,11 +269,12 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_sweep_activated", action=argparse.BooleanOptionalAction)
 
     parser.add_argument("--augmentation", type=str, default="simple",
-                             choices=["noaug", "simple", "rand-m9-n3-mstd0.5", "rand-mstd1-w0", "random_erase"])
+        choices=["noaug", "simple", "rand-m9-n3-mstd0.5", "rand-mstd1-w0", "random_erase"])
 
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
     parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--t_mult", type=int, default=2)
 
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction)
