@@ -24,7 +24,7 @@ def rand_erase_augmentation(resize_size):
 def _no_augumentation(resize_size):
     return transforms.Compose([
                 transforms.Resize(resize_size),
-                transforms.CenterCrop(resize_size), #why resize and center_crop are needed
+                transforms.CenterCrop(resize_size), #why resize and center_crop are needed TODO: FIX: this will crop content, resize size should be not shorter size.
                 transforms.ToTensor(),
                 transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD)
             ])

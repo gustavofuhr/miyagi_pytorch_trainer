@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from sklearn.metrics import f1_score, confusion_matrix
 import wandb
 
 import models
@@ -28,6 +29,9 @@ def train_model(model,
                 loss_function,
                 n_epochs = 100,
                 metric_eer = True,
+                metric_f1 = False,
+                metric_confusion_matrix = False,
+                metric_per_class_accuracy = False,
                 track_experiment = False,
                 track_images = False, 
                 save_best_model = True):
@@ -72,8 +76,12 @@ def train_model(model,
 
     model_name = wandb.run.name if track_experiment else \
                     datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    model_path = os.path.join("../trained_models/", f"{model_name}.pt")
-                    
+    
+    if save_best_model:
+        if not os.path.exists("trained_models/"):
+            os.makedirs("trained_models/")
+    
+    model_path = os.path.join("trained_models/", f"{model_name}.pt")
 
     for epoch in range(num_epochs):
         start_epoch = time.time()
@@ -84,6 +92,8 @@ def train_model(model,
             epoch_log = {}
 
         # Each epoch has a training and validation phase
+        all_preds = []
+        all_labels = []
         for phase in phases:
             if phase == 'train':
                 model.train()  # Set model to training mode
@@ -129,51 +139,60 @@ def train_model(model,
                 if metric_eer:
                     running_outputs = torch.cat((running_outputs, outputs.detach().cpu()))
 
-                #if phase == "train":
-                #    wrong_epoch_images.extend([x for x in inputs[preds!=labels]])
-                    #if track_images:
-                    #    wrong_epoch_attr.extend([(labels[i], preds[i])\
-                    #                                for i in (preds!=labels).nonzero().flatten()])
+                all_preds.append(preds.detach().cpu().numpy())
+                all_labels.append(labels.detach().cpu().numpy())
+
 
             if phase == 'train':
                 scheduler.step()
 
-            if metric_eer:
-                probs = metrics.softmax(running_outputs)
-                scores = probs[:,1]
-
-                epoch_eer = 100 * metrics.eer_metric(running_labels, scores)
-
+            # basic metrics, loss and overall accuracy
             epoch_loss = running_loss/len(dataloaders[phase])
             epoch_acc = 100 * running_corrects.double() / dataset_sizes[phase]
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.2f}%')
+            if track_experiment:
+                epoch_log[f"{phase}_loss"] = epoch_loss
+                epoch_log[f"{phase}_acc"] = epoch_acc
+
+            # special metrics #TODO: put in metrics.py or something
+            if metric_eer:
+                probs = metrics.softmax(running_outputs)
+                scores = probs[:,1]
+                epoch_eer = 100 * metrics.eer_metric(running_labels, scores)
+                epoch_log[f"{phase}_epoch_eer"] = epoch_eer
+
+            flat_labels = np.concatenate(all_labels)
+            flat_preds = np.concatenate(all_preds)
+
+            if metric_f1:
+                epoch_f1 = f1_score(flat_labels, flat_preds, average='macro')
+                epoch_log["epoch_f1"] = epoch_f1
+
+            if metric_confusion_matrix or metric_per_class_accuracy:
+                cm = confusion_matrix(flat_labels, flat_preds)
+                per_class_acc = cm.diagonal() / cm.sum(axis=1)
+            if metric_confusion_matrix:
+                epoch_log[f"{phase}_confusion_matrix"] = wandb.plot.confusion_matrix(
+                    y_true=flat_labels, 
+                    preds=flat_preds, 
+                    class_names=dataloaders[phase].dataset.classes
+                )
+            if metric_per_class_accuracy:
+                for idx, acc in enumerate(per_class_acc):
+                    epoch_log[f"{phase}_class_{dataloaders[phase].dataset.classes[idx]}_acc"] = acc
 
             if phase == "val":
                 if epoch_acc > best_acc:
                     best_acc = epoch_acc
-                if metric_eer and epoch_eer < best_eer:
-                    best_eer = epoch_eer
 
             if save_best_model:
-                save_curr_model = (not metric_eer and epoch_acc > best_acc) or \
-                                  (metric_eer and epoch_eer < best_eer)
+                save_curr_model = False # make sure that we use a coherent metric to see if this is the best model
                 if save_curr_model:
                     torch.save(model, model_path)
                     
             if track_experiment:
                 if phase == "val":
                     wandb.run.summary["best_val_acc"] = best_acc
-
-                epoch_log.update({
-                    f"{phase}_loss": epoch_loss,
-                    f"{phase}_acc": epoch_acc,
-                })
-                if metric_eer:
-                    epoch_log.update({
-                        f"{phase}_eer": epoch_eer
-                    })
-                    if phase == "val":
-                        wandb.run.summary["best_val_eer"] = best_eer
 
                 if track_images and phase == "train":
                     epoch_log.update({"last_train_batch" : wandb.Image(inputs)})
@@ -239,8 +258,9 @@ def train(args):
             wandb.init(project=args.experiment_group, name=args.experiment_name, entity=args.wandb_user, config=args)
 
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
-                    int(args.n_epochs), args.metric_eer, args.track_experiment, args.track_images, 
-                    args.save_best_model)
+                    int(args.n_epochs), args.metric_eer, args.metric_f1_score, 
+                    args.metric_confusion_matrix, args.metric_per_class_accuracy,
+                    args.track_experiment, args.track_images, args.save_best_model)
     
     if args.wandb_sweep_activated:
         wandb.finish()
@@ -285,6 +305,11 @@ if __name__ == "__main__":
 
     # options for liveness
     parser.add_argument("--metric_eer", action=argparse.BooleanOptionalAction, default=False)
+
+    # options for multi-class classification
+    parser.add_argument("--metric_f1_score", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--metric_confusion_matrix", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--metric_per_class_accuracy", action=argparse.BooleanOptionalAction, default=False)
 
     # options for losses
     parser.add_argument("--loss",  type=str, default="cross_entropy")
