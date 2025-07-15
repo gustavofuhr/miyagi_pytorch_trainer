@@ -11,7 +11,6 @@ import torch.nn as nn
 from tqdm import tqdm
 import wandb
 
-
 import models
 import dataloaders
 import augmentations
@@ -28,10 +27,10 @@ def train_model(model,
                 scheduler,
                 loss_function,
                 n_epochs = 100,
-                metric_eer = False,
+                metric_eer = True,
                 track_experiment = False,
                 track_images = False, 
-                save_best_model = False):
+                save_best_model = True):
     """
     Train a model given model params and dataset loaders
     """
@@ -71,8 +70,10 @@ def train_model(model,
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
     num_epochs = n_epochs
 
-    start = time.time()
-
+    model_name = wandb.run.name if track_experiment else \
+                    datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    model_path = os.path.join("../trained_models/", f"{model_name}.pt")
+                    
 
     for epoch in range(num_epochs):
         start_epoch = time.time()
@@ -114,7 +115,6 @@ def train_model(model,
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
-
                     _, preds = torch.max(outputs, 1)
                     loss = loss_function(outputs, labels)
 
@@ -158,16 +158,7 @@ def train_model(model,
                 save_curr_model = (not metric_eer and epoch_acc > best_acc) or \
                                   (metric_eer and epoch_eer < best_eer)
                 if save_curr_model:
-                    model_folder = wandb.run.name if track_experiment else \
-                                   datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-                    if not os.path.exists(model_folder):
-                        os.mkdir(model_folder)
-                    torch.save({
-                            'epoch': epoch,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'loss': loss,
-                            }, os.path.join(model_folder, "best_saved_model.pt"))
+                    torch.save(model, model_path)
                     
             if track_experiment:
                 if phase == "val":
@@ -239,7 +230,8 @@ def train(args):
     loss_function = losses.get_loss(args.loss)
 
     if args.wandb_sweep_activated:
-        wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args)
+        wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args, 
+                            name=f"{args.backbone}_rs{args.resize_size}")
     elif args.track_experiment:
         if args.experiment_group == "" or args.experiment_name == "":
             raise Exception("Should define both the experiment group and name.")
@@ -249,6 +241,10 @@ def train(args):
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metric_eer, args.track_experiment, args.track_images, 
                     args.save_best_model)
+    
+    if args.wandb_sweep_activated:
+        wandb.finish()
+
 
 
 if __name__ == "__main__":
@@ -285,10 +281,10 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=1e-4)
 
     # options for model saving
-    parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction, default=True)
 
     # options for liveness
-    parser.add_argument("--metric_eer", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--metric_eer", action=argparse.BooleanOptionalAction, default=False)
 
     # options for losses
     parser.add_argument("--loss",  type=str, default="cross_entropy")

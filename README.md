@@ -111,7 +111,7 @@ Since we're dealing with classification problems, cross entropy is the default l
 
 We don't use an specific lib for augmentation, but we support some nice ones. You just need to define the `--augmentation` parameter to one of those:
 
-- `no_aug`: resize the image according to the `resize_size` parameter and normalize it;
+- `noaug`: resize the image according to the `resize_size` parameter and normalize it;
 - `simple`: some crop, flips and rotations;
 - `random_erase`: erase parts of the images randomly;
 - `rand-m9-n3-mstd0.5`, `rand-mstd1-w0`, etc: RandAugment from timm library. Usually the best option, check the [official doc](https://timm.fast.ai/RandAugment) for details.

@@ -6,6 +6,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
+from datasets import CUSTOM_DATASETS
 
 
 def _get_pytorch_dataloders(dataset, batch_size, num_workers, balanced_weights = False):
