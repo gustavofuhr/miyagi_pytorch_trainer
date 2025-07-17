@@ -2,6 +2,7 @@ import os
 import inspect
 from collections import defaultdict, Counter
 
+import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -9,8 +10,8 @@ import torchvision.transforms as transforms
 from datasets import CUSTOM_DATASETS
 
 
-def _get_pytorch_dataloders(dataset, batch_size, num_workers, balanced_weights = False):
-    if balanced_weights:
+def _get_pytorch_dataloders(dataset, batch_size, num_workers, balance_sampling = False):
+    if balance_sampling:
         class_sample_count = torch.tensor([*dataset.class_sample_count.values()])
 
         weight = 1. / class_sample_count.float()
@@ -50,33 +51,6 @@ def _get_image_folder_dataset(dataset_name, split, transform):
                                                                             transform=transform)
 
     return dataset
-
-def DEPRECATED_get_ffcv_dataloaders(root_dir, dataset_name, resize_size, batch_size, num_workers):
-    # Random resized crop
-    decoder = RandomResizedCropRGBImageDecoder((resize_size, resize_size))
-
-    # TODO: pipelines should be different for train, val, normally.
-    # TODO: augmentation should be done by another lib and equal for testing purposes.
-    # Data decoding and augmentation
-    image_pipeline = [decoder, ToTensor(), ToTorchImage(), ToDevice(0)]
-    label_pipeline = [IntDecoder(), ToTensor(), ToDevice(0)]
-
-    # Pipeline for each data field
-    pipelines = {
-        'image': image_pipeline,
-        'label': label_pipeline
-    }
-
-    train_loader = Loader(os.path.join(root_dir, f"{dataset_name}_train.beton"),
-                                            batch_size=batch_size, num_workers=num_workers,
-                                            order=OrderOption.RANDOM, pipelines=pipelines, os_cache=True)
-
-    val_loader = Loader(os.path.join(root_dir, f"{dataset_name}_val.beton"),
-                                            batch_size=batch_size, num_workers=num_workers,
-                                            order=OrderOption.RANDOM, pipelines=pipelines, os_cache=True)
-
-
-    return train_loader, val_loader
 
 
 class DatasetJoin(torch.utils.data.ConcatDataset):
@@ -123,7 +97,7 @@ def get_dataset_loaders(dataset_names,
                             transforms,
                             batch_size = 32,
                             num_workers = 4,
-                            balanced_weights = False):
+                            class_imbalance_strategy = "none"):
 
     """
     Expecting dataset_names and transforms to be dict with "train" and "val" keys
@@ -143,25 +117,13 @@ def get_dataset_loaders(dataset_names,
 
         # TODO: https://stackoverflow.com/questions/71173583/concat-datasets-in-pytorch
         combined_datasets[s] = DatasetJoin(split_datasets)
-        data_loaders[s] = _get_pytorch_dataloders(combined_datasets[s], batch_size, num_workers, balanced_weights)
+        data_loaders[s] = _get_pytorch_dataloders(combined_datasets[s], batch_size, num_workers, class_imbalance_strategy == "batch")
 
-    return data_loaders["train"], data_loaders["val"]
+    train_targets = combined_datasets["train"].all_targets
+    train_class_counts = np.bincount(train_targets.numpy(), minlength=len(combined_datasets["train"].classes))
+    print("train class counts:", train_class_counts)
 
-
-# def DEPRECATED_get_pytorch_default_transform(resize_size):
-
-#     def_transform = transforms.Compose([
-#         transforms.ToTensor(),
-#         transforms.Lambda(lambda x: x.repeat(3, 1, 1) if x.size(0)==1 else x)
-#     ])
-
-#     if resize_size is not None:
-#         def_transform = transforms.Compose([
-#             transforms.Resize((resize_size,resize_size)),
-#             def_transform
-#         ])
-
-#     return def_transform
+    return data_loaders["train"], data_loaders["val"], train_class_counts
 
 
 if __name__ == "__main__":
