@@ -1,10 +1,111 @@
+import torch
 import torch.nn as nn
 from scipy.optimize import brentq
 from scipy.interpolate import interp1d
 from sklearn.metrics import roc_curve
 import numpy as np
+from sklearn.metrics import f1_score, confusion_matrix
+
 
 softmax = nn.Softmax(dim=1)
+METRIC_GOALS = {
+    "acc": "max",
+    "eer": "min",
+    "f1_score": "max",
+    "per_class_accuracy": "max",
+    "loss": "min"
+}
+
+def init_metrics_best(metrics_list):
+    best = {}
+    phases = ["train", "val"]
+    for m in metrics_list:
+        if m != "confusion_matrix":           
+            for ph in phases:
+                if METRIC_GOALS[m] == "max":
+                    best[f"{ph}_{m}"] = 0.
+                elif METRIC_GOALS[m] == "min":
+                    best[f"{ph}_{m}"] = np.inf
+    return best
+
+
+def get_metrics_new_best(metrics_list, phase, epoch_log, curr_best):
+    metrics_with_new_bests = []
+    for metric in metrics_list:
+        if metric == "confusion_matrix" or "per_class_accuracy":
+            continue
+
+        if METRIC_GOALS[metric] == "max" and epoch_log[f"{phase}_{metric}"] > curr_best[f"{phase}_{metric}"]:
+            curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
+            metrics_with_new_bests.append(f"{phase}_{metric}")
+        elif METRIC_GOALS[metric] == "min" and epoch_log[f"{phase}_{metric}"] < curr_best[f"{phase}_{metric}"]:
+            curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
+            metrics_with_new_bests.append(f"{phase}_{metric}")
+
+    return curr_best, metrics_with_new_bests
+
+
+def compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits = None, class_names=None):
+    """
+    Compute metrics to be used in the training loop for logging them into WandB 
+        and getting the best model
+
+        metrics can be: ["acc", "eer", "f1_score", "confusion_matrix", "per_class_accuracy"]
+    """
+    #TODO: fix per_class_accuracy
+    #TODO: make sure we are putting % (*100) when makes sense
+    flat_labels = np.concatenate(epoch_labels)
+    flat_preds = np.concatenate(epoch_preds)
+    epoch_log = {}
+
+    if "acc" in metrics_list:
+        epoch_acc = 100.0 * (flat_preds == flat_labels).sum() / len(flat_labels)
+        epoch_log[f"{phase}_acc"] = epoch_acc
+
+    if "eer" in metrics_list and epoch_logits is not None and eer_metric is not None:
+        flat_logits = np.concatenate(epoch_logits)
+        flat_scores = torch.softmax(torch.from_numpy(flat_logits), dim=1).numpy()
+        positive_scores = flat_scores[:, 1]  # for binary, use positive class index
+        epoch_eer = 100 * eer_metric(flat_labels, positive_scores)
+        epoch_log[f"{phase}_eer"] = epoch_eer
+
+    if "f1_score" in metrics_list:
+        epoch_f1 = f1_score(flat_labels, flat_preds, average='macro')
+        epoch_log[f"{phase}_f1_score"] = epoch_f1
+
+    if "confusion_matrix" in metrics_list or "per_class_accuracy" in metrics_list:
+        cm = confusion_matrix(flat_labels, flat_preds)
+        # confusion matrix will be done by wandb
+        # if "confusion_matrix" in metrics_list:
+        #     epoch_log[f"{phase}_confusion_matrix"] = cm
+        if "per_class_accuracy" in metrics_list:
+            per_class_acc = cm.diagonal() / cm.sum(axis=1)
+            for idx, acc in enumerate(per_class_acc):
+                class_name = class_names[idx] if class_names else str(idx)
+                epoch_log[f"{phase}_class_{class_name}_acc"] = 100.0 * acc
+            
+    return epoch_log
+            
+
+def print_metrics(metrics_list, epoch_log, phase, class_names = None):
+    parts = []
+    for m in metrics_list:
+        if m == "confusion_matrix":
+            continue
+        if m == "per_class_accuracy":
+            for cls in class_names:
+                k = f"{phase}_class_{cls}_acc"
+                val = epoch_log.get(k, None)
+                parts.append(f"{k}: {val:.2f}%")
+        else:
+            key = f"{phase}_{m}"
+            val = epoch_log.get(key, None)
+            if val is not None:
+                suffix = "%" if m in ["acc", "eer"] else ""
+                parts.append(f"{m}: {val:.2f}{suffix}")
+    print(" | ".join(parts))
+
+
 
 class Metrics():
 
@@ -85,7 +186,7 @@ def calc_far_frr(results, ground_truths, const:int=100):
         # np.dot will sum all the results where passed_thresh==1 and ground_truths==1
         TP = np.dot(passed_thresh, ground_truths)
         # Inverting results and gts will sum passed_thresh==0 and ground_truths==0
-        TN = np.dot(1-passed_thresh, 1-ground_truths)
+        TN = np.dot(1-passed_thresh, 1-ground_tmean_per_class_accruths)
         # Inverting the passed_thresh will sum passed_thresh==0 and ground_truths==1
         FN = np.dot(1-passed_thresh, ground_truths)
         # Inverting the ground_truths will sum passed_thresh==1 and ground_truths==0
