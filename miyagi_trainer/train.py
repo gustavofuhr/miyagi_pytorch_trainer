@@ -168,8 +168,8 @@ def train_model(model,
         wandb.run.summary["total_duration"] = time_elapsed
 
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-    print("Best metrics:")
-    metrics.print_metrics(metrics_list + ["loss"], best_metrics, "val")
+    # print("Best metrics:")
+    # metrics.print_metrics(metrics_list + ["loss"], best_metrics, "val")
 
     
 def train(args):
@@ -209,14 +209,20 @@ def train(args):
         loss_function = losses.get_loss(args.loss)
     
 
+    def get_model_size(model):
+        return sum(p.numel() for p in model.parameters())
+    
+    model_size_params = get_model_size(model)
     if args.wandb_sweep_activated:
         wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args, 
                             name=f"{args.backbone}_rs{args.resize_size}")
+        wandb.config.model_size_params = model_size_params
     elif args.track_experiment:
         if args.experiment_group == "" or args.experiment_name == "":
             raise Exception("Should define both the experiment group and name.")
         else:
             wandb.init(project=args.experiment_group, name=args.experiment_name, entity=args.wandb_user, config=args)
+        wandb.config.model_size_params = model_size_params
 
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metrics, args.track_experiment, 
@@ -288,7 +294,7 @@ if __name__ == "__main__":
         "--metrics",
         type=str,
         nargs="+",
-        default=["acc", "f1_score", "confusion_matrix"],
+        default=["acc", "f1_score", "confusion_matrix", "per_class_accuracy"],
         choices=["acc", "eer", "f1_score", "confusion_matrix", "per_class_accuracy"],
         help="List of metrics to compute: eer, f1_score, confusion_matrix, per_class_accuracy"
     )

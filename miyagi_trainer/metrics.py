@@ -32,9 +32,10 @@ def init_metrics_best(metrics_list):
 def get_metrics_new_best(metrics_list, phase, epoch_log, curr_best):
     metrics_with_new_bests = []
     for metric in metrics_list:
-        if metric == "confusion_matrix" or "per_class_accuracy":
+        if metric == "confusion_matrix" or metric == "per_class_accuracy":
             continue
 
+        print(METRIC_GOALS[metric], epoch_log[f"{phase}_{metric}"], curr_best[f"{phase}_{metric}"])
         if METRIC_GOALS[metric] == "max" and epoch_log[f"{phase}_{metric}"] > curr_best[f"{phase}_{metric}"]:
             curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
             metrics_with_new_bests.append(f"{phase}_{metric}")
