@@ -2,7 +2,7 @@ import os
 import argparse
 import time
 import datetime
-import copy
+import json
 from collections import deque
 
 import numpy as np
@@ -58,10 +58,11 @@ def train_model(model,
     }
 
     print("Dataset classes:")
-    print("Train", dataloaders["train"].dataset.classes)
-    print("Val", dataloaders["val"].dataset.classes)
+    print("Train", dataloaders["train"].dataset.join_class_to_idx)
+    print("Val", dataloaders["val"].dataset.join_class_to_idx)
 
-    class_names = dataloaders["val"].dataset.classes
+    class_names = list(dataloaders["train"].dataset.join_class_to_idx.keys())
+    print("Classes:", class_names)
     phases = ["train", "val"]
     # dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
     num_epochs = n_epochs
@@ -79,9 +80,9 @@ def train_model(model,
         print('-' * 10)
 
         epoch_log = {}
-        epoch_preds, epoch_labels, epoch_logits = [], [], []
         # Each epoch has a training and validation phase
         for phase in phases:
+            epoch_preds, epoch_labels, epoch_logits = [], [], []
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -137,6 +138,9 @@ def train_model(model,
                 if f"{phase}_{save_best_metric}" in metrics_w_new_best: 
                     print(f"Metric {phase}_{save_best_metric} got new best, saving model.")
                     torch.save(model, model_path)
+
+                    with open(f"trained_models/{model_name}_class_to_idx.json", "w") as f:
+                        json.dump(dataloaders["train"].dataset.join_class_to_idx, f)
                     
             if track_experiment:
                 if phase == "val":
@@ -180,6 +184,8 @@ def train(args):
         "train": train_transform,
         "val": val_transform
     }
+    print("val_transform", val_transform)
+
 
     # NOTE: I'am enabling using + between dataset names because of sweeps which does not work with nargs
     in_datasets_names = {
