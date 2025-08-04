@@ -62,6 +62,11 @@ def train_model(model,
     print("Val", dataloaders["val"].dataset.classes)
 
     class_names = dataloaders["val"].dataset.classes
+    is_binary = len(class_names) == 2
+    if "score_histogram" in metrics_list and not is_binary:
+        print("Warning: score_histogram metric is only applicable for binary classification tasks.")
+        metrics_list.remove("score_histogram")
+
     phases = ["train", "val"]
     # dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
     num_epochs = n_epochs
@@ -80,6 +85,8 @@ def train_model(model,
 
         epoch_log = {}
         epoch_preds, epoch_labels, epoch_logits = [], [], []
+        if is_binary:
+            epoch_probs = []
         # Each epoch has a training and validation phase
         for phase in phases:
             if phase == 'train':
@@ -115,6 +122,10 @@ def train_model(model,
                 epoch_logits.append(outputs.detach().cpu().numpy())
                 epoch_preds.append(preds.detach().cpu().numpy())
                 epoch_labels.append(labels.detach().cpu().numpy())
+
+                if is_binary:
+                    probs = torch.softmax(outputs, dim=1)  # probs for class 1
+                    epoch_probs.append(probs.detach().cpu().numpy())
 
 
             if phase == 'train':
@@ -159,6 +170,10 @@ def train_model(model,
                 )                
 
             epoch_log.update({"duration_epoch": duration_epoch})
+            if track_experiment and is_binary and phase == "val":
+                all_probs = np.concatenate(epoch_probs, axis=0)  # shape: (N, 2)
+                for i, class_name in enumerate(class_names):
+                    epoch_log[f"val_score_histogram_{class_name}"] = wandb.Histogram(all_probs[:, i])
             wandb.log(epoch_log, step=epoch)
         print()
 
@@ -286,7 +301,7 @@ if __name__ == "__main__":
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
-        "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "confusion_matrix", "per_class_accuracy"],
+        "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "confusion_matrix", "per_class_accuracy", "score_histogram"],
         help="Save model with goal metric"
     )
 
