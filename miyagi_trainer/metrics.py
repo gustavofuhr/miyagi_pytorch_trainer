@@ -35,7 +35,6 @@ def get_metrics_new_best(metrics_list, phase, epoch_log, curr_best):
         if metric == "confusion_matrix" or metric == "per_class_accuracy":
             continue
 
-        print(METRIC_GOALS[metric], epoch_log[f"{phase}_{metric}"], curr_best[f"{phase}_{metric}"])
         if METRIC_GOALS[metric] == "max" and epoch_log[f"{phase}_{metric}"] > curr_best[f"{phase}_{metric}"]:
             curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
             metrics_with_new_bests.append(f"{phase}_{metric}")
@@ -59,6 +58,8 @@ def compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits
     flat_preds = np.concatenate(epoch_preds)
     epoch_log = {}
 
+    print("Computeing metrics for", phase)
+    print("Number of samples:", len(flat_labels))
     if "acc" in metrics_list:
         epoch_acc = 100.0 * (flat_preds == flat_labels).sum() / len(flat_labels)
         epoch_log[f"{phase}_acc"] = epoch_acc
