@@ -61,12 +61,12 @@ def train_model(model,
     print("Train", dataloaders["train"].dataset.join_class_to_idx)
     print("Val", dataloaders["val"].dataset.join_class_to_idx)
 
+    class_names = list(dataloaders["train"].dataset.join_class_to_idx.keys())
     is_binary = len(class_names) == 2
     if "score_histogram" in metrics_list and not is_binary:
         print("Warning: score_histogram metric is only applicable for binary classification tasks.")
         metrics_list.remove("score_histogram")
 
-    class_names = list(dataloaders["train"].dataset.join_class_to_idx.keys())
     print("Classes:", class_names)
     phases = ["train", "val"]
     # dataset_sizes = {x: len(dataloaders[x].dataset) for x in phases}
