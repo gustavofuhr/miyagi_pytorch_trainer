@@ -85,11 +85,12 @@ def train_model(model,
         print('-' * 10)
 
         epoch_log = {}
-        epoch_preds, epoch_labels, epoch_logits = [], [], []
-        if is_binary:
-            epoch_probs = []
         # Each epoch has a training and validation phase
         for phase in phases:
+            epoch_preds, epoch_labels, epoch_logits = [], [], []
+            if is_binary:
+                epoch_probs = []
+            
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -236,7 +237,7 @@ def train(args):
     model_size_params = get_model_size(model)
     if args.wandb_sweep_activated:
         wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args, 
-                            name=f"{args.backbone}_rs{args.resize_size}")
+                            name=f"{args.backbone}_aug_{args.augmentation}_bs{args.batch_size}_sched_{args.scheduler}_cis_{args.class_imbalance_strategy}")
         wandb.config.model_size_params = model_size_params
     elif args.track_experiment:
         if args.experiment_group == "" or args.experiment_name == "":
@@ -298,7 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_sweep_activated", action=argparse.BooleanOptionalAction)
 
     parser.add_argument("--augmentation", type=str, default="simple",
-                             choices=["noaug", "simple", "random_erase"])
+                             choices=["noaug", "simple", "random_erase", "liveness_single"])
 
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
@@ -315,7 +316,7 @@ if __name__ == "__main__":
         "--metrics",
         type=str,
         nargs="+",
-        default=["acc", "f1_score", "confusion_matrix", "per_class_accuracy"],
+        default=["acc", "eer", "per_class_accuracy"],
         choices=["acc", "eer", "f1_score", "confusion_matrix", "per_class_accuracy"],
         help="List of metrics to compute: eer, f1_score, confusion_matrix, per_class_accuracy"
     )
