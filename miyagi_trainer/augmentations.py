@@ -1,5 +1,8 @@
 from torchvision import transforms
 from PIL import Image
+import albumentations as A
+import numpy as np
+import cv2
 
 
 DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -103,7 +106,68 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
         return simple_augmentation(resize_size, resize_fn)
     elif augmentation_opt == "random_erase":
         return rand_erase_augmentation(resize_size, resize_fn)
+    elif augmentation_opt == "liveness_single":
+        return liveness_single_augmentation(resize_size, resize_fn)
     else:
-        raise ValueError(f"Unknown augmentation option: {augmentation_opt}. "
-                         f"Available options: 'noaug', 'simple', 'random_erase'.")
-        # return rand_augmentation(resize_size, augmentation_opt, resize_fn)
+        raise ValueError(
+            f"Unknown augmentation option: {augmentation_opt}. "
+            f"Available options: 'noaug', 'simple', 'random_erase', 'liveness_single'."
+        )
+
+
+class AlbumentationsTransform:
+    """Adapter so we can drop an Albumentations pipeline inside torchvision.Compose."""
+    def __init__(self, aug):
+        self.aug = aug
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        arr = np.array(img)  # RGB HWC uint8
+        out = self.aug(image=arr)["image"]  # returns HWC uint8
+        return Image.fromarray(out)
+    
+
+def liveness_single_augmentation(resize_size, resize_fn=resize_stretch):
+    """
+    One shared augmentation for live/spoof with:
+      - Mild/strong motion blur (random)
+      - Tiny geometric jitter
+      - Exposure/Gamma
+      - CLAHE (light, occasional)
+    """
+    resize_transform = resize_fn(resize_size)
+
+    aug = A.Compose([
+        # Motion blur: pick mild or strong, applied with p=0.3 overall
+        A.OneOf([
+            A.MotionBlur(blur_limit=(6, 9), p=1.0),   # mild
+            A.MotionBlur(blur_limit=(9, 12), p=1.0),   # strong
+        ], p=0.3),
+
+        # Tiny geometric jitter (very conservative to avoid warping live faces)
+        A.Affine(
+            scale=(1.05, 1.15),          # zoom in +15%
+            translate_percent=(0.0, 0.05),  # shift up to 5%
+            p=0.2
+        ),
+
+        # Exposure/Gamma (pick one small tweak)
+        A.OneOf([
+            A.RandomBrightnessContrast(brightness_limit=0.25, contrast_limit=0.25, p=1.0),
+            A.RandomGamma(gamma_limit=(70, 130), p=1.0)   # ≈ γ∈[0.70, 1.30]
+        ], p=0.5),
+
+        # CLAHE lightly/occasionally
+        A.CLAHE(clip_limit=(1, 2), tile_grid_size=(8, 8), p=0.2),
+    ])
+
+    train_transform = transforms.Compose([
+        *resize_transform.transforms,
+        AlbumentationsTransform(aug),
+        transforms.ToTensor(),
+        transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD),
+    ])
+
+    # Validation: no aug (deterministic)
+    val_transform = _no_augmentation(resize_size, resize_fn)
+
+    return train_transform, val_transform
