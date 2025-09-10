@@ -34,7 +34,9 @@ def train_model(model,
                 track_experiment,
                 track_images, 
                 save_best_model,
-                save_best_metric):
+                save_best_metric,
+                save_best_model_dir=None,
+                wandb_sweep_activated=False):
     """
     Train a model given model params and dataset loaders
     """
@@ -74,11 +76,20 @@ def train_model(model,
     model_name = wandb.run.name if track_experiment else \
                     datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     
+    # Configure best model directory with optional arg and wandb sweep subdir
+    base_best_dir = save_best_model_dir or "trained_models"
+    if track_experiment and wandb_sweep_activated:
+        # Prefer wandb provided sweep id/name; fallback to env; else generic
+        sweep_name = getattr(getattr(wandb, "run", None), "sweep_id", None) or \
+                     os.environ.get("WANDB_SWEEP_ID") or "sweep"
+        SAVE_BEST_MODEL_DIR = os.path.join(base_best_dir, str(sweep_name))
+    else:
+        SAVE_BEST_MODEL_DIR = base_best_dir
     if save_best_model:
-        if not os.path.exists("trained_models/"):
-            os.makedirs("trained_models/")
+        if not os.path.exists(SAVE_BEST_MODEL_DIR):
+            os.makedirs(SAVE_BEST_MODEL_DIR)
     
-    model_path = os.path.join("trained_models/", f"{model_name}.pt")
+    model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}.pt")
     for epoch in range(num_epochs):
         start_epoch = time.time()
         print(f'Epoch {epoch}/{num_epochs - 1}')
@@ -151,7 +162,7 @@ def train_model(model,
                     print(f"Metric {phase}_{save_best_metric} got new best, saving model.")
                     torch.save(model, model_path)
 
-                    with open(f"trained_models/{model_name}_class_to_idx.json", "w") as f:
+                    with open(f"{SAVE_BEST_MODEL_DIR}/{model_name}_class_to_idx.json", "w") as f:
                         json.dump(dataloaders["train"].dataset.join_class_to_idx, f)
                     
             if track_experiment:
@@ -216,7 +227,7 @@ def train(args):
                                                                 args.class_imbalance_strategy)
 
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
-                                        not args.no_transfer_learning, args.freeze_all_but_last)
+                                        not args.no_transfer_learning, args.freeze_all_but_last, args.drop_path_rate)
     print(f"model {args.backbone}")
     # print(model)
 
@@ -248,7 +259,8 @@ def train(args):
 
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metrics, args.track_experiment, 
-                    args.track_images, args.save_best_model, args.save_best_metric)
+                    args.track_images, args.save_best_model, args.save_best_metric,
+                    args.save_best_model_dir, args.wandb_sweep_activated)
     
     if args.wandb_sweep_activated:
         wandb.finish()
@@ -311,6 +323,12 @@ if __name__ == "__main__":
         "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "confusion_matrix", "per_class_accuracy", "score_histogram"],
         help="Save model with goal metric"
     )
+    parser.add_argument(
+        "--save_best_model_dir",
+        type=str,
+        default="trained_models",
+        help="Directory to save best model checkpoints; if running a wandb sweep, a subdirectory with the sweep id is used"
+    )
 
     parser.add_argument(
         "--metrics",
@@ -327,6 +345,7 @@ if __name__ == "__main__":
     parser.add_argument("--ce_loss_label_smoothing",  type=float, required=False, default=0.0)
 
     parser.add_argument("--scheduler", type=str, choices=["cosine", "onecycle"], default="cosine")
+    parser.add_argument("--drop_path_rate", type=float, default=0.0)
 
     args = parser.parse_args()
     train(args)
