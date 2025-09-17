@@ -75,6 +75,9 @@ def train_model(model,
     num_epochs = n_epochs
     model_name = wandb.run.name if track_experiment else \
                     datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    run_suffix = ""
+    if track_experiment and wandb_sweep_activated and wandb.run:
+        run_suffix = f"__{wandb.run.id.replace(' ', '_')}"
     
     # Configure best model directory with optional arg and wandb sweep subdir
     base_best_dir = save_best_model_dir or "trained_models"
@@ -89,7 +92,7 @@ def train_model(model,
         if not os.path.exists(SAVE_BEST_MODEL_DIR):
             os.makedirs(SAVE_BEST_MODEL_DIR)
     
-    model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}.pt")
+    model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}.pt")
     for epoch in range(num_epochs):
         start_epoch = time.time()
         print(f'Epoch {epoch}/{num_epochs - 1}')
@@ -162,7 +165,7 @@ def train_model(model,
                     print(f"Metric {phase}_{save_best_metric} got new best, saving model.")
                     torch.save(model, model_path)
 
-                    with open(f"{SAVE_BEST_MODEL_DIR}/{model_name}_class_to_idx.json", "w") as f:
+                    with open(os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_class_to_idx.json"), "w") as f:
                         json.dump(dataloaders["train"].dataset.join_class_to_idx, f)
                     
             if track_experiment:
@@ -248,7 +251,7 @@ def train(args):
     model_size_params = get_model_size(model)
     if args.wandb_sweep_activated:
         wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args, 
-                            name=f"{args.backbone}_aug_{args.augmentation}_bs{args.batch_size}_sched_{args.scheduler}_cis_{args.class_imbalance_strategy}")
+                            name=f"{args.backbone}_aug_{args.augmentation}_bs{args.batch_size}")
         wandb.config.model_size_params = model_size_params
     elif args.track_experiment:
         if args.experiment_group == "" or args.experiment_name == "":
