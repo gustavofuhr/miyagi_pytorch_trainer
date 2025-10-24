@@ -281,6 +281,12 @@ if __name__ == "__main__":
     # {phase} datasets are hope to have {phase}-named folders inside them
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--val_datasets", action='store', type=str, nargs="+", required=True)
+
+    parser.add_argument("--train_dataset_dirs", action='store', type=str, nargs="+", default=None,
+                        help="(Optional) specify dataset dirs directly instead of using predefined names")
+    parser.add_argument("--val_dataset_dirs", action='store', type=str, nargs="+",
+                        help="(Optional) specify dataset dirs directly instead of using predefined names")
+
     parser.add_argument(
         "--class_imbalance_strategy", type=str, default="none",
         choices=["none", "batch", "loss"],
@@ -351,4 +357,10 @@ if __name__ == "__main__":
     parser.add_argument("--drop_path_rate", type=float, default=0.0)
 
     args = parser.parse_args()
+
+    if (args.train_datasets is None) == (args.train_dataset_dirs is None):
+        parser.error("You must provide either --train_datasets OR --train_dataset_dirs (but not both).")
+    if (args.val_datasets is None) == (args.val_dataset_dirs is None):
+        parser.error("You must provide either --val_datasets OR --val_dataset_dirs (but not both).")
+        
     train(args)

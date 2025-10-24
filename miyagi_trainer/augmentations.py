@@ -107,7 +107,7 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
     elif augmentation_opt == "random_erase":
         return rand_erase_augmentation(resize_size, resize_fn)
     elif augmentation_opt == "liveness_single":
-        return liveness_single_augmentation(resize_size, resize_fn)
+        return liveness_single_augmentation(resize_size, resize_fn), _no_augmentation(resize_size, resize_fn)
     else:
         raise ValueError(
             f"Unknown augmentation option: {augmentation_opt}. "
@@ -167,7 +167,4 @@ def liveness_single_augmentation(resize_size, resize_fn=resize_stretch):
         transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD),
     ])
 
-    # Validation: no aug (deterministic)
-    val_transform = _no_augmentation(resize_size, resize_fn)
-
-    return train_transform, val_transform
+    return train_transform
