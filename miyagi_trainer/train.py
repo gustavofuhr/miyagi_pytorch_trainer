@@ -32,11 +32,12 @@ def train_model(model,
                 n_epochs,
                 metrics_list,
                 track_experiment,
-                track_images, 
+                track_images,
                 save_best_model,
                 save_best_metric,
                 save_best_model_dir=None,
-                wandb_sweep_activated=False):
+                wandb_sweep_activated=False,
+                track_all_images=False):
     """
     Train a model given model params and dataset loaders
     """
@@ -49,7 +50,8 @@ def train_model(model,
 
     model.to(device)
     if track_experiment:
-        wandb.watch(model)
+        # wandb.watch(model)
+        pass # disable so the flush is faster (hopefully)
 
     since = time.time()
 
@@ -76,7 +78,7 @@ def train_model(model,
     model_name = wandb.run.name if track_experiment else \
                     datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     run_suffix = ""
-    if track_experiment and wandb_sweep_activated and wandb.run:
+    if track_experiment and wandb_sweep_activated and wandb.run and model_name.find(wandb.run.id) == -1:
         run_suffix = f"__{wandb.run.id.replace(' ', '_')}"
     
     # Configure best model directory with optional arg and wandb sweep subdir
@@ -93,6 +95,8 @@ def train_model(model,
             os.makedirs(SAVE_BEST_MODEL_DIR)
     
     model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}.pt")
+    logged_images_once = False
+
     for epoch in range(num_epochs):
         start_epoch = time.time()
         print(f'Epoch {epoch}/{num_epochs - 1}')
@@ -104,7 +108,7 @@ def train_model(model,
             epoch_preds, epoch_labels, epoch_logits = [], [], []
             if is_binary:
                 epoch_probs = []
-            
+
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -115,6 +119,7 @@ def train_model(model,
             for batch_idx, (inputs, labels) in enumerate(tqdm(dataloaders[phase])):
                 # TODO: needs to cast to float.
                 inputs = inputs.float().to(device)
+
                 # TODO: a bunch of stupid convertion for label.
                 labels = labels.type(torch.LongTensor).flatten().to(device)
 
@@ -143,6 +148,9 @@ def train_model(model,
                     probs = torch.softmax(outputs, dim=1)  # probs for class 1
                     epoch_probs.append(probs.detach().cpu().numpy())
 
+                if track_experiment and track_images and not logged_images_once:
+                    epoch_log["example_train_batch"] = wandb.Image(inputs.detach().cpu())
+                    logged_images_once = True
 
             if phase == 'train':
                 scheduler.step()
@@ -173,8 +181,8 @@ def train_model(model,
                     for key, val in best_metrics.items():
                         wandb.run.summary[f"best_{key}"] = val
 
-                if track_images and phase == "train":
-                    epoch_log.update({"last_train_batch" : wandb.Image(inputs)})
+                if track_images and phase == "train" and track_all_images:
+                    epoch_log["last_train_batch"] = wandb.Image(inputs.detach().cpu())
 
 
         duration_epoch = time.time() - start_epoch
@@ -251,8 +259,11 @@ def train(args):
     model_size_params = get_model_size(model)
     if args.wandb_sweep_activated:
         wandb.init(project=args.experiment_group, entity=args.wandb_user, config=args, 
-                            name=f"{args.backbone}_aug_{args.augmentation}_bs{args.batch_size}")
+                            name=f"{args.backbone}_sz{args.resize_size}")
         wandb.config.model_size_params = model_size_params
+        run_hash = wandb.run.id[:8]
+        wandb.run.name = f"{args.backbone}_sz{args.resize_size}_{run_hash}"
+        wandb.run.save()
     elif args.track_experiment:
         if args.experiment_group == "" or args.experiment_name == "":
             raise Exception("Should define both the experiment group and name.")
@@ -263,7 +274,7 @@ def train(args):
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metrics, args.track_experiment, 
                     args.track_images, args.save_best_model, args.save_best_metric,
-                    args.save_best_model_dir, args.wandb_sweep_activated)
+                    args.save_best_model_dir, args.wandb_sweep_activated, args.track_all_images)
     
     if args.wandb_sweep_activated:
         wandb.finish()
@@ -298,12 +309,13 @@ if __name__ == "__main__":
         "--resize_policy",
         type=str,
         default="resize_exact",
-        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding"],
+        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only"],
         help=(
             "How to resize input images: "
             "'resize_then_center_crop' (keep aspect, center crop), "
             "'resize_exact' (force resize, may distort), "
             "'resize_with_padding' (letterbox style, pad to fit)."
+            "'center_crop_only' (crop the center without resizing)."
         ),
     )
     
@@ -316,6 +328,8 @@ if __name__ == "__main__":
     parser.add_argument("--experiment_group", default="miyagi-pytorch-trainer")
     parser.add_argument("--experiment_name", default="")
     parser.add_argument("--track_images", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--track_all_images", action=argparse.BooleanOptionalAction)
+
     parser.add_argument("--wandb_user")
     parser.add_argument("--wandb_sweep_activated", action=argparse.BooleanOptionalAction)
 
@@ -329,7 +343,7 @@ if __name__ == "__main__":
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
-        "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "confusion_matrix", "per_class_accuracy", "score_histogram"],
+        "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "frr_at_far", "confusion_matrix", "per_class_accuracy", "score_histogram"],
         help="Save model with goal metric"
     )
     parser.add_argument(
@@ -344,7 +358,7 @@ if __name__ == "__main__":
         type=str,
         nargs="+",
         default=["acc", "eer", "per_class_accuracy"],
-        choices=["acc", "eer", "f1_score", "confusion_matrix", "per_class_accuracy"],
+        choices=["acc", "eer", "frr_at_far", "f1_score", "confusion_matrix", "per_class_accuracy"],
         help="List of metrics to compute: eer, f1_score, confusion_matrix, per_class_accuracy"
     )
     

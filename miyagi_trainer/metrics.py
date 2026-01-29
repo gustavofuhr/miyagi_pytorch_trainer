@@ -13,7 +13,8 @@ METRIC_GOALS = {
     "eer": "min",
     "f1_score": "max",
     "per_class_accuracy": "max",
-    "loss": "min"
+    "loss": "min",
+    "frr_at_far": "min" # would be FAR at 1%
 }
 
 def init_metrics_best(metrics_list):
@@ -64,12 +65,37 @@ def compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits
         epoch_acc = 100.0 * (flat_preds == flat_labels).sum() / len(flat_labels)
         epoch_log[f"{phase}_acc"] = epoch_acc
 
-    if "eer" in metrics_list and epoch_logits is not None and eer_metric is not None:
+    # Compute scores for binary metrics (EER, FRR@FAR) if needed
+    positive_scores = None
+    if epoch_logits is not None and ("eer" in metrics_list or "frr_at_far" in metrics_list):
         flat_logits = np.concatenate(epoch_logits)
         flat_scores = torch.softmax(torch.from_numpy(flat_logits), dim=1).numpy()
-        positive_scores = flat_scores[:, 1]  # for binary, use positive class index
+        # assume binary: class index 1 is the "positive" / live class
+        if flat_scores.shape[1] >= 2:
+            positive_scores = flat_scores[:, 1]
+
+    if "eer" in metrics_list and positive_scores is not None:
         epoch_eer = 100 * eer_metric(flat_labels, positive_scores)
         epoch_log[f"{phase}_eer"] = epoch_eer
+
+    if "frr_at_far" in metrics_list and positive_scores is not None:
+        # FARs: 10%, 1%, 0.1%, 0.01%
+        target_fars = {
+            "10": 0.10,
+            "1": 0.01,
+            "0_1": 0.001,
+            "0_01": 0.0001,
+        }
+        frrs = compute_frr_at_fars(flat_labels, positive_scores, target_fars)
+
+        # log each specific operating point (in %)
+        for name, fr in frrs.items():
+            epoch_log[f"{phase}_frr_at_far_{name}"] = 100.0 * fr
+
+        # define a primary scalar for selection: use the strictest FAR = 0.01%
+        primary_name = "1"
+        epoch_log[f"{phase}_frr_at_far"] = 100.0 * frrs[primary_name]
+
 
     if "f1_score" in metrics_list:
         epoch_f1 = f1_score(flat_labels, flat_preds, average='macro')
@@ -94,17 +120,53 @@ def print_metrics(metrics_list, epoch_log, phase, class_names = None):
     for m in metrics_list:
         if m == "confusion_matrix":
             continue
+
         if m == "per_class_accuracy":
             for cls in class_names:
                 k = f"{phase}_class_{cls}_acc"
                 val = epoch_log.get(k, None)
-                parts.append(f"{k}: {val:.2f}%")
+                if val is not None:
+                    parts.append(f"{k}: {val:.2f}%")
+
+        elif m == "frr_at_far":
+            # Primary scalar (we defined as FAR = 0.01%)
+            base_key = f"{phase}_frr_at_far"
+            base_val = epoch_log.get(base_key, None)
+
+            # Detailed operating points (if present)
+            k10   = f"{phase}_frr_at_far_10"
+            k1    = f"{phase}_frr_at_far_1"
+            k0_1  = f"{phase}_frr_at_far_0_1"
+            k0_01 = f"{phase}_frr_at_far_0_01"
+
+            v10   = epoch_log.get(k10, None)
+            v1    = epoch_log.get(k1, None)
+            v0_1  = epoch_log.get(k0_1, None)
+            v0_01 = epoch_log.get(k0_01, None)
+
+            # Build a nice summary line if we have values
+            sub_parts = []
+            if v10   is not None: sub_parts.append(f"FAR=10%: {v10:.2f}%")
+            if v1    is not None: sub_parts.append(f"1%: {v1:.2f}%")
+            if v0_1  is not None: sub_parts.append(f"0.1%: {v0_1:.2f}%")
+            if v0_01 is not None: sub_parts.append(f"0.01%: {v0_01:.2f}%")
+
+            if base_val is not None and sub_parts:
+                # base_val should be the strictest (0.01%) we used for selection
+                parts.append(
+                    f"frr_at_far (primary=1%): {base_val:.2f}% "
+                    + "[" + ", ".join(sub_parts) + "]"
+                )
+            elif base_val is not None:
+                parts.append(f"frr_at_far: {base_val:.2f}%")
+
         else:
             key = f"{phase}_{m}"
             val = epoch_log.get(key, None)
             if val is not None:
                 suffix = "%" if m in ["acc", "eer"] else ""
                 parts.append(f"{m}: {val:.2f}{suffix}")
+
     print(" | ".join(parts))
 
 
@@ -213,3 +275,22 @@ def calc_far_frr(results, ground_truths, const:int=100):
 
     return fars, frrs, eer
 
+def compute_frr_at_fars(labels, scores, target_fars):
+    """
+    labels: 0/1 (0 = spoof, 1 = live)
+    scores: higher = more likely live (e.g. prob for class 1)
+    target_fars: dict {name: float_far}, e.g. {"10": 0.10, "1": 0.01, ...}
+
+    Returns:
+        dict {name: frr_value_in_[0,1]}
+    """
+    fpr, tpr, _ = roc_curve(labels, scores, pos_label=1)
+    frr = 1.0 - tpr  # FRR = 1 - TPR
+
+    result = {}
+    # fpr is sorted ascending by roc_curve
+    for name, far in target_fars.items():
+        # interpolate FRR at desired FAR, clamp outside range
+        fr = np.interp(far, fpr, frr, left=frr[0], right=frr[-1])
+        result[name] = fr
+    return result
