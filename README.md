@@ -15,20 +15,46 @@ A pytorch trainer with a range of choice for backbones, losses, augmentations. A
 
 ## Quickstart
 
-1. Create and activate the conda environment (it should take a few minutes):
+### creating the environment.
+
+You have three different alternatives, I would go with Docker.
+
+1. conda:
+
+Create and activate the conda environment (it should take a few minutes):
 
 ```
 conda env create --name miyagi --file=environment.yml
 conda activate miyagi
 ```
 
-2. (Optionally) Login in with your [wandb](https://wandb.ai/) account:
+2. **python-venv** and pip requirements (use Python 3.10):
+
+```
+ENV_NAME=".miyagi"
+
+python3.10 -m venv "$ENV_NAME"
+source "$ENV_NAME"/bin/activate
+
+# optional, if you want to use notebooks
+pip install ipython ipykernel
+ipython kernel install --user --name="$ENV_NAME"
+```
+
+3. docker:
+
+```
+docker build -t miyagi-trainer:cu121 .
+```
+
+
+#### (Optionally) Login in with your [wandb](https://wandb.ai/) account:
 
 ```
 wandb login
 ```
 
-3. Run training (ex.: CIFAR10, mobilenet_v3, CE loss):
+### Run training (ex.: CIFAR10, mobilenet_v3, CE loss):
 
 ```
 python miyagi_trainer/train.py --resize_size 224 --train_datasets CIFAR10 --val_datasets CIFAR10 --backbone mobilenetv3_large_100

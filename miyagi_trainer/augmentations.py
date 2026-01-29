@@ -44,6 +44,12 @@ def resize_letterbox(resize_size, fill_color=(114, 114, 114)):
         LetterboxTransform(resize_size, fill_color)
     ])
 
+def center_crop_only(crop_size):
+    """CenterCrop without any resizing first (will discard borders)."""
+    return transforms.Compose([
+        transforms.CenterCrop(crop_size)
+    ])
+
 # TODO: make a decent support for augmentation from timm.
 # from timm.data.transforms_factory import create_transform
 #  "rand-m9-n3-mstd0.5", "rand-mstd1-w0",
@@ -77,6 +83,17 @@ def _no_augmentation(resize_size, resize_fn=resize_stretch):
         transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD)
     ])
 
+def horizontal_flip_augmentation(resize_size, resize_fn=resize_stretch):
+    resize_transform = resize_fn(resize_size)
+    return (
+        transforms.Compose([
+            *resize_transform.transforms,
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD)
+        ]),
+        _no_augmentation(resize_size, resize_fn)
+    )
 
 def simple_augmentation(resize_size, resize_fn=resize_stretch):
     resize_transform = resize_fn(resize_size)
@@ -91,12 +108,13 @@ def simple_augmentation(resize_size, resize_fn=resize_stretch):
         _no_augmentation(resize_size, resize_fn)
     )
 
-
+    
 def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact"):
     resize_fns = {
         "resize_then_center_crop": resize_then_center_crop,
         "resize_exact": resize_stretch,
-        "resize_with_padding": resize_letterbox
+        "resize_with_padding": resize_letterbox,
+        "center_crop_only": center_crop_only
     }
     resize_fn = resize_fns[resize_mode]
 
@@ -104,6 +122,8 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
         return _no_augmentation(resize_size, resize_fn), _no_augmentation(resize_size, resize_fn)
     elif augmentation_opt == "simple":
         return simple_augmentation(resize_size, resize_fn)
+    elif augmentation_opt == "horizontal_flip":  
+        return horizontal_flip_augmentation(resize_size, resize_fn)
     elif augmentation_opt == "random_erase":
         return rand_erase_augmentation(resize_size, resize_fn)
     elif augmentation_opt == "liveness_single":
@@ -111,7 +131,7 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
     else:
         raise ValueError(
             f"Unknown augmentation option: {augmentation_opt}. "
-            f"Available options: 'noaug', 'simple', 'random_erase', 'liveness_single'."
+            f"Available options: 'noaug', 'simple', 'horizontal_flip', 'random_erase', 'liveness_single'."
         )
 
 
@@ -137,6 +157,8 @@ def liveness_single_augmentation(resize_size, resize_fn=resize_stretch):
     resize_transform = resize_fn(resize_size)
 
     aug = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        
         # Motion blur: pick mild or strong, applied with p=0.3 overall
         A.OneOf([
             A.MotionBlur(blur_limit=(6, 9), p=1.0),   # mild

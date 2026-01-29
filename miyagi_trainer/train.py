@@ -334,7 +334,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_sweep_activated", action=argparse.BooleanOptionalAction)
 
     parser.add_argument("--augmentation", type=str, default="simple",
-                             choices=["noaug", "simple", "random_erase", "liveness_single"])
+                             choices=["noaug", "simple", "horizontal_flip", "random_erase", "liveness_single"])
 
     # options for optimizers
     parser.add_argument("--optimizer", default="sgd") # possible adam, adamp and sgd
