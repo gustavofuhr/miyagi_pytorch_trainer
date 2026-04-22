@@ -14,7 +14,8 @@ METRIC_GOALS = {
     "f1_score": "max",
     "per_class_accuracy": "max",
     "loss": "min",
-    "frr_at_far": "min" # would be FAR at 1%
+    "frr_at_far": "min",  # primary: FRR at FAR=1%
+    "far_at_frr": "min",  # primary: FAR at FRR=1%
 }
 
 def init_metrics_best(metrics_list):
@@ -33,15 +34,44 @@ def init_metrics_best(metrics_list):
 def get_metrics_new_best(metrics_list, phase, epoch_log, curr_best):
     metrics_with_new_bests = []
     for metric in metrics_list:
-        if metric == "confusion_matrix" or metric == "per_class_accuracy":
+        if metric == "confusion_matrix":
             continue
 
-        if METRIC_GOALS[metric] == "max" and epoch_log[f"{phase}_{metric}"] > curr_best[f"{phase}_{metric}"]:
-            curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
-            metrics_with_new_bests.append(f"{phase}_{metric}")
-        elif METRIC_GOALS[metric] == "min" and epoch_log[f"{phase}_{metric}"] < curr_best[f"{phase}_{metric}"]:
-            curr_best[f"{phase}_{metric}"] = epoch_log[f"{phase}_{metric}"]
-            metrics_with_new_bests.append(f"{phase}_{metric}")
+        if metric == "per_class_accuracy":
+            # Track best for each class individually
+            for key, val in epoch_log.items():
+                if not key.startswith(f"{phase}_class_"):
+                    continue
+                goal = "max"
+                if key not in curr_best:
+                    curr_best[key] = val
+                    metrics_with_new_bests.append(key)
+                elif val > curr_best[key]:
+                    curr_best[key] = val
+                    metrics_with_new_bests.append(key)
+            continue
+
+        key = f"{phase}_{metric}"
+        goal = METRIC_GOALS[metric]
+        if goal == "max" and epoch_log[key] > curr_best[key]:
+            curr_best[key] = epoch_log[key]
+            metrics_with_new_bests.append(key)
+        elif goal == "min" and epoch_log[key] < curr_best[key]:
+            curr_best[key] = epoch_log[key]
+            metrics_with_new_bests.append(key)
+
+        if metric in ("frr_at_far", "far_at_frr"):
+            # Also track augmented operating-point keys (all are "min")
+            for suffix in ["10", "1", "0_1", "0_01"]:
+                aug_key = f"{phase}_{metric}_{suffix}"
+                if aug_key not in epoch_log:
+                    continue
+                if aug_key not in curr_best:
+                    curr_best[aug_key] = epoch_log[aug_key]
+                    metrics_with_new_bests.append(aug_key)
+                elif epoch_log[aug_key] < curr_best[aug_key]:
+                    curr_best[aug_key] = epoch_log[aug_key]
+                    metrics_with_new_bests.append(aug_key)
 
     return curr_best, metrics_with_new_bests
 
@@ -78,23 +108,26 @@ def compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits
         epoch_eer = 100 * eer_metric(flat_labels, positive_scores)
         epoch_log[f"{phase}_eer"] = epoch_eer
 
-    if "frr_at_far" in metrics_list and positive_scores is not None:
-        # FARs: 10%, 1%, 0.1%, 0.01%
-        target_fars = {
-            "10": 0.10,
-            "1": 0.01,
-            "0_1": 0.001,
-            "0_01": 0.0001,
-        }
-        frrs = compute_frr_at_fars(flat_labels, positive_scores, target_fars)
+    target_operating_points = {
+        "10": 0.10,
+        "1": 0.01,
+        "0_1": 0.001,
+        "0_01": 0.0001,
+    }
 
-        # log each specific operating point (in %)
+    if "frr_at_far" in metrics_list and positive_scores is not None:
+        frrs = compute_frr_at_fars(flat_labels, positive_scores, target_operating_points)
         for name, fr in frrs.items():
             epoch_log[f"{phase}_frr_at_far_{name}"] = 100.0 * fr
+        # primary scalar: FRR at FAR=1%
+        epoch_log[f"{phase}_frr_at_far"] = 100.0 * frrs["1"]
 
-        # define a primary scalar for selection: use the strictest FAR = 0.01%
-        primary_name = "1"
-        epoch_log[f"{phase}_frr_at_far"] = 100.0 * frrs[primary_name]
+    if "far_at_frr" in metrics_list and positive_scores is not None:
+        fars = compute_far_at_frrs(flat_labels, positive_scores, target_operating_points)
+        for name, fa in fars.items():
+            epoch_log[f"{phase}_far_at_frr_{name}"] = 100.0 * fa
+        # primary scalar: FAR at FRR=1%
+        epoch_log[f"{phase}_far_at_frr"] = 100.0 * fars["1"]
 
 
     if "f1_score" in metrics_list:
@@ -128,37 +161,17 @@ def print_metrics(metrics_list, epoch_log, phase, class_names = None):
                 if val is not None:
                     parts.append(f"{k}: {val:.2f}%")
 
-        elif m == "frr_at_far":
-            # Primary scalar (we defined as FAR = 0.01%)
-            base_key = f"{phase}_frr_at_far"
-            base_val = epoch_log.get(base_key, None)
-
-            # Detailed operating points (if present)
-            k10   = f"{phase}_frr_at_far_10"
-            k1    = f"{phase}_frr_at_far_1"
-            k0_1  = f"{phase}_frr_at_far_0_1"
-            k0_01 = f"{phase}_frr_at_far_0_01"
-
-            v10   = epoch_log.get(k10, None)
-            v1    = epoch_log.get(k1, None)
-            v0_1  = epoch_log.get(k0_1, None)
-            v0_01 = epoch_log.get(k0_01, None)
-
-            # Build a nice summary line if we have values
+        elif m in ("frr_at_far", "far_at_frr"):
+            base_val = epoch_log.get(f"{phase}_{m}", None)
             sub_parts = []
-            if v10   is not None: sub_parts.append(f"FAR=10%: {v10:.2f}%")
-            if v1    is not None: sub_parts.append(f"1%: {v1:.2f}%")
-            if v0_1  is not None: sub_parts.append(f"0.1%: {v0_1:.2f}%")
-            if v0_01 is not None: sub_parts.append(f"0.01%: {v0_01:.2f}%")
-
+            for suffix, label in [("10", "10%"), ("1", "1%"), ("0_1", "0.1%"), ("0_01", "0.01%")]:
+                v = epoch_log.get(f"{phase}_{m}_{suffix}", None)
+                if v is not None:
+                    sub_parts.append(f"{label}: {v:.2f}%")
             if base_val is not None and sub_parts:
-                # base_val should be the strictest (0.01%) we used for selection
-                parts.append(
-                    f"frr_at_far (primary=1%): {base_val:.2f}% "
-                    + "[" + ", ".join(sub_parts) + "]"
-                )
+                parts.append(f"{m} (primary=1%): {base_val:.2f}% [" + ", ".join(sub_parts) + "]")
             elif base_val is not None:
-                parts.append(f"frr_at_far: {base_val:.2f}%")
+                parts.append(f"{m}: {base_val:.2f}%")
 
         else:
             key = f"{phase}_{m}"
@@ -274,6 +287,26 @@ def calc_far_frr(results, ground_truths, const:int=100):
             break
 
     return fars, frrs, eer
+
+def compute_far_at_frrs(labels, scores, target_frrs):
+    """
+    labels: 0/1 (0 = spoof, 1 = live)
+    scores: higher = more likely live (e.g. prob for class 1)
+    target_frrs: dict {name: float_frr}, e.g. {"10": 0.10, "1": 0.01, ...}
+
+    Returns:
+        dict {name: far_value_in_[0,1]}
+    """
+    fpr, tpr, _ = roc_curve(labels, scores, pos_label=1)
+    frr = 1.0 - tpr  # FRR = 1 - TPR; non-increasing as fpr increases
+
+    result = {}
+    # frr is non-increasing, fpr is non-decreasing; flip to interpolate fpr at target frr
+    for name, target_frr in target_frrs.items():
+        fa = np.interp(target_frr, frr[::-1], fpr[::-1], left=fpr[-1], right=fpr[0])
+        result[name] = fa
+    return result
+
 
 def compute_frr_at_fars(labels, scores, target_fars):
     """

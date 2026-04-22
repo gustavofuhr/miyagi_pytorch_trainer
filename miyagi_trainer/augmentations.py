@@ -50,6 +50,66 @@ def center_crop_only(crop_size):
         transforms.CenterCrop(crop_size)
     ])
 
+
+class EyeRegionCropTransform:
+    """Crops the eye region from a 272×272 ArcFace-aligned face image.
+
+    Landmark positions in the 272×272 output of FaceProcessor (112 base + 80px border):
+      left eye ≈ (118, 132),  right eye ≈ (154, 132)
+
+    loose (tight=False): 0.30 removed each side, ±27px vertically  → ~109×54
+    tight (tight=True):  0.36 removed each side, ±13px vertically  →  ~76×26
+    """
+    EYE_Y_CENTER = 132
+
+    def __init__(self, tight: bool = False):
+        self.tight = tight
+        self._y_margin  = 13 if tight else 27
+        # fraction of width removed from each side:
+        #   loose: 0.30 → keeps 40% of width (~109px on 272px image)
+        #   tight: 0.36 → keeps 28% of width (~76px on 272px image)
+        self._x_margin_frac = 0.36 if tight else 0.30
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        w, h = img.size
+        x_left   = round(w * self._x_margin_frac)
+        x_right  = w - x_left
+        y_top    = max(0, self.EYE_Y_CENTER - self._y_margin)
+        y_bottom = min(h, self.EYE_Y_CENTER + self._y_margin)
+        return img.crop((x_left, y_top, x_right, y_bottom))
+
+
+def eye_region_crop_exact(resize_size):
+    """Loose eye crop → squish to resize_size×resize_size."""
+    return transforms.Compose([
+        EyeRegionCropTransform(tight=False),
+        *resize_stretch(resize_size).transforms,
+    ])
+
+
+def eye_region_crop_letterbox(resize_size):
+    """Loose eye crop → letterbox-pad to resize_size×resize_size."""
+    return transforms.Compose([
+        EyeRegionCropTransform(tight=False),
+        *resize_letterbox(resize_size).transforms,
+    ])
+
+
+def eye_region_crop_tight_exact(resize_size):
+    """Tight eye crop → squish to resize_size×resize_size."""
+    return transforms.Compose([
+        EyeRegionCropTransform(tight=True),
+        *resize_stretch(resize_size).transforms,
+    ])
+
+
+def eye_region_crop_tight_letterbox(resize_size):
+    """Tight eye crop → letterbox-pad to resize_size×resize_size."""
+    return transforms.Compose([
+        EyeRegionCropTransform(tight=True),
+        *resize_letterbox(resize_size).transforms,
+    ])
+
 # TODO: make a decent support for augmentation from timm.
 # from timm.data.transforms_factory import create_transform
 #  "rand-m9-n3-mstd0.5", "rand-mstd1-w0",
@@ -114,7 +174,11 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
         "resize_then_center_crop": resize_then_center_crop,
         "resize_exact": resize_stretch,
         "resize_with_padding": resize_letterbox,
-        "center_crop_only": center_crop_only
+        "center_crop_only": center_crop_only,
+        "eye_region_crop_exact": eye_region_crop_exact,
+        "eye_region_crop_letterbox": eye_region_crop_letterbox,
+        "eye_region_crop_tight_exact": eye_region_crop_tight_exact,
+        "eye_region_crop_tight_letterbox": eye_region_crop_tight_letterbox,
     }
     resize_fn = resize_fns[resize_mode]
 

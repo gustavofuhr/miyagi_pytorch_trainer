@@ -42,5 +42,27 @@ CUSTOM_DATASETS = {
     "controlid_ds7_5_ir_b80_no_mask": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5b80_no_mask/IR",
     "controlid_ds7_5_rgb_b80_no_mask": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5b80_no_mask/RGB",
 
+    "controlid_ds7_5_ir_b80_full": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5b80_full/IR",
+    "controlid_ds7_5_rgb_b80_full": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5b80_full/RGB",
 
+    "controlid_ds7_5_5_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5_5b80/IR",
+    "controlid_ds7_5_5_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_5_5b80/RGB",
+
+    "controlid_ds7_6_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_6b80/IR",
+    "controlid_ds7_6_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_6b80/RGB",
+
+    "controlid_ds7_7_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_7b80/IR",
+    "controlid_ds7_7_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_7b80/RGB",
+
+    "controlid_ds7_8_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_8b80/IR",
+    "controlid_ds7_8_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_8b80/RGB",
+
+    "controlid_ds7_9_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_9b80/IR",
+    "controlid_ds7_9_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_9b80/RGB",
+
+    "controlid_ds7_10_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_10b80/IR",
+    "controlid_ds7_10_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_10b80/RGB",
+
+    "controlid_ds7_11_ir_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_11b80/IR",
+    "controlid_ds7_11_rgb_b80": "/home/gfuhr/projects/data/liveness/controlid_liveness_ds_7_11b80/RGB",
 }

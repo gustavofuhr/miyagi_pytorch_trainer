@@ -34,7 +34,7 @@ def train_model(model,
                 track_experiment,
                 track_images,
                 save_best_model,
-                save_best_metric,
+                save_on_best_metrics,
                 save_best_model_dir=None,
                 wandb_sweep_activated=False,
                 track_all_images=False):
@@ -94,8 +94,8 @@ def train_model(model,
         if not os.path.exists(SAVE_BEST_MODEL_DIR):
             os.makedirs(SAVE_BEST_MODEL_DIR)
     
-    model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}.pt")
     logged_images_once = False
+    logged_val_images_once = False
 
     for epoch in range(num_epochs):
         start_epoch = time.time()
@@ -148,9 +148,12 @@ def train_model(model,
                     probs = torch.softmax(outputs, dim=1)  # probs for class 1
                     epoch_probs.append(probs.detach().cpu().numpy())
 
-                if track_experiment and track_images and not logged_images_once:
+                if track_experiment and track_images and not logged_images_once and phase == 'train':
                     epoch_log["example_train_batch"] = wandb.Image(inputs.detach().cpu())
                     logged_images_once = True
+                if track_experiment and track_images and not logged_val_images_once and phase == 'val':
+                    epoch_log["example_val_batch"] = wandb.Image(inputs.detach().cpu())
+                    logged_val_images_once = True
 
             if phase == 'train':
                 scheduler.step()
@@ -168,11 +171,14 @@ def train_model(model,
             metrics.print_metrics(metrics_list, epoch_log, phase, class_names)            
           
             if save_best_model and phase == "val":
-                # if the metric got a new best in val
-                if f"{phase}_{save_best_metric}" in metrics_w_new_best: 
-                    print(f"Metric {phase}_{save_best_metric} got new best, saving model.")
-                    torch.save(model, model_path)
-
+                saved_any = False
+                for metric in save_on_best_metrics:
+                    if f"{phase}_{metric}" in metrics_w_new_best:
+                        print(f"Metric {phase}_{metric} got new best, saving model.")
+                        model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_best_{metric}.pt")
+                        torch.save(model, model_path)
+                        saved_any = True
+                if saved_any:
                     with open(os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_class_to_idx.json"), "w") as f:
                         json.dump(dataloaders["train"].dataset.join_class_to_idx, f)
                     
@@ -231,11 +237,15 @@ def train(args):
         "val": args.val_datasets[0].split("+") if "+" in args.val_datasets[0] else args.val_datasets,
     }
 
-    train_loader, val_loader, train_class_counts = dataloaders.get_dataset_loaders(in_datasets_names,
-                                                                transformers,
-                                                                int(args.batch_size),
-                                                                int(args.num_dataloader_workers),
-                                                                args.class_imbalance_strategy)
+    
+    train_loader, val_loader, train_class_counts = dataloaders.get_dataset_loaders(
+        in_datasets_names,
+        transformers,
+        int(args.batch_size),
+        int(args.num_dataloader_workers),
+        args.class_imbalance_strategy,
+        filter_off_regex=args.filter_off_files_regex 
+    )
 
     model = models.get_model(args.backbone, len(train_loader.dataset.classes),
                                         not args.no_transfer_learning, args.freeze_all_but_last, args.drop_path_rate)
@@ -272,8 +282,8 @@ def train(args):
         wandb.config.model_size_params = model_size_params
 
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
-                    int(args.n_epochs), args.metrics, args.track_experiment, 
-                    args.track_images, args.save_best_model, args.save_best_metric,
+                    int(args.n_epochs), args.metrics, args.track_experiment,
+                    args.track_images, args.save_best_model, args.save_on_best_metrics,
                     args.save_best_model_dir, args.wandb_sweep_activated, args.track_all_images)
     
     if args.wandb_sweep_activated:
@@ -297,6 +307,10 @@ if __name__ == "__main__":
                         help="(Optional) specify dataset dirs directly instead of using predefined names")
     parser.add_argument("--val_dataset_dirs", action='store', type=str, nargs="+",
                         help="(Optional) specify dataset dirs directly instead of using predefined names")
+    
+    parser.add_argument("--filter_off_files_regex", type=str, default=None, 
+                        help="Regex pattern to exclude files (e.g., 'bad_files|outliers'). "
+                             "Matches against the full file path.")
 
     parser.add_argument(
         "--class_imbalance_strategy", type=str, default="none",
@@ -309,7 +323,7 @@ if __name__ == "__main__":
         "--resize_policy",
         type=str,
         default="resize_exact",
-        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only"],
+        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only", "eye_region_crop_exact", "eye_region_crop_letterbox", "eye_region_crop_tight_exact", "eye_region_crop_tight_letterbox"],
         help=(
             "How to resize input images: "
             "'resize_then_center_crop' (keep aspect, center crop), "
@@ -343,8 +357,9 @@ if __name__ == "__main__":
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
-        "--save_best_metric", type=str, default="f1_score", choices=["acc", "loss", "eer", "f1_score", "frr_at_far", "confusion_matrix", "per_class_accuracy", "score_histogram"],
-        help="Save model with goal metric"
+        "--save_on_best_metrics", type=str, nargs="+", default=["f1_score"],
+        choices=["acc", "loss", "eer", "f1_score", "frr_at_far", "far_at_frr", "confusion_matrix", "per_class_accuracy", "score_histogram"],
+        help="Save a separate model checkpoint whenever a new best is reached for any of these metrics"
     )
     parser.add_argument(
         "--save_best_model_dir",
@@ -358,7 +373,7 @@ if __name__ == "__main__":
         type=str,
         nargs="+",
         default=["acc", "eer", "per_class_accuracy"],
-        choices=["acc", "eer", "frr_at_far", "f1_score", "confusion_matrix", "per_class_accuracy"],
+        choices=["acc", "eer", "frr_at_far", "far_at_frr", "f1_score", "confusion_matrix", "per_class_accuracy"],
         help="List of metrics to compute: eer, f1_score, confusion_matrix, per_class_accuracy"
     )
     

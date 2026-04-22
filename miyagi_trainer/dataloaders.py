@@ -1,5 +1,6 @@
 import os
 import inspect
+import re
 from collections import defaultdict, Counter
 
 import numpy as np
@@ -9,6 +10,8 @@ import torchvision.transforms as transforms
 
 from datasets import CUSTOM_DATASETS
 
+
+VALID_IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
 
 def _get_pytorch_dataloders(dataset, batch_size, num_workers, balance_sampling = False):
     if balance_sampling:
@@ -46,9 +49,38 @@ def _get_pytorch_dataset(dataset_name, split, transform):
 
     return dataset
 
-def _get_image_folder_dataset(dataset_name, split, transform):
-    dataset = torchvision.datasets.ImageFolder(root=os.path.join(CUSTOM_DATASETS[dataset_name], split),
-                                                                            transform=transform)
+
+def _get_image_folder_dataset(dataset_name, split, transform, filter_off_regex=None):
+    root_path = os.path.join(CUSTOM_DATASETS[dataset_name], split)
+
+    # Logic: If regex is provided, we build a custom checker. 
+    # Otherwise we let ImageFolder use its default (None).
+    is_valid_func = None
+    
+    if filter_off_regex:
+        print(f"Applying regex filter '{filter_off_regex}' to {dataset_name}/{split}")
+        pattern = re.compile(filter_off_regex)
+
+        def file_filter(path):
+            # 1. Check if it's an image file (Case insensitive)
+            if not path.lower().endswith(VALID_IMG_EXTENSIONS):
+                return False
+            
+            # 2. Check if path matches the user regex (e.g. "bad_file")
+            # We search the full path so you can filter by folder names too if needed
+            if pattern.search(path):
+                return False
+            
+            return True
+        
+        is_valid_func = file_filter
+
+    # Pass is_valid_file. Note: extensions arg is ignored if is_valid_file is not None.
+    dataset = torchvision.datasets.ImageFolder(
+        root=root_path,
+        transform=transform,
+        is_valid_file=is_valid_func 
+    )
 
     return dataset
 
@@ -97,11 +129,9 @@ def get_dataset_loaders(dataset_names,
                             transforms,
                             batch_size = 32,
                             num_workers = 4,
-                            class_imbalance_strategy = "none"):
+                            class_imbalance_strategy = "none",
+                            filter_off_regex = None): 
 
-    """
-    Expecting dataset_names and transforms to be dict with "train" and "val" keys
-    """
     splits = ["train", "val"]
     combined_datasets = {}
     data_loaders = {}
@@ -111,11 +141,11 @@ def get_dataset_loaders(dataset_names,
             if ds_name in dir(torchvision.datasets):
                 this_dataset = _get_pytorch_dataset(ds_name, s, transforms[s])
             elif ds_name in CUSTOM_DATASETS.keys():
-                this_dataset = _get_image_folder_dataset(ds_name, s, transforms[s])
+                # Pass filter regex here
+                this_dataset = _get_image_folder_dataset(ds_name, s, transforms[s], filter_off_regex)
 
             split_datasets.append(this_dataset)
 
-        # TODO: https://stackoverflow.com/questions/71173583/concat-datasets-in-pytorch
         combined_datasets[s] = DatasetJoin(split_datasets)
         data_loaders[s] = _get_pytorch_dataloders(combined_datasets[s], batch_size, num_workers, class_imbalance_strategy == "batch")
 
