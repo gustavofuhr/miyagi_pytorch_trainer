@@ -41,26 +41,70 @@ pip install ipython ipykernel
 ipython kernel install --user --name="$ENV_NAME"
 ```
 
-3. docker:
+3. **docker** (recommended):
 
-```
+**Prerequisites:** NVIDIA driver ≥ 525 and [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed.
+
+**Build the image** (from inside this directory):
+```bash
 docker build -t miyagi-trainer:cu121 .
 ```
 
-
-#### (Optionally) Login in with your [wandb](https://wandb.ai/) account:
-
+**Quick test with CIFAR10** — no data to mount, the dataset is downloaded automatically:
+```bash
+docker run --gpus all --rm --shm-size=2g \
+  -v ./saved_models:/workspace/trained_models \
+  miyagi-trainer:cu121 \
+  python miyagi_trainer/train.py \
+    --resize_size 224 \
+    --train_datasets CIFAR10 \
+    --val_datasets CIFAR10 \
+    --backbone mobilenetv3_large_100
 ```
-wandb login
+
+**Training with your own data** — mount your dataset and an output directory:
+```bash
+docker run --gpus all --rm --shm-size=8g \
+  -v /path/to/your/dataset:/workspace/data/my_dataset \
+  -v /path/to/save/models:/workspace/trained_models \
+  -e WANDB_API_KEY \
+  miyagi-trainer:cu121 \
+  python miyagi_trainer/train.py \
+    --resize_size 224 \
+    --train_datasets /workspace/data/my_dataset \
+    --val_datasets /workspace/data/my_dataset \
+    --backbone mobilenetv3_large_100
+```
+
+The dataset folder must follow the `train/class/image.png` and `val/class/image.png` structure. See the **Datasets** section below for details.
+
+To target a specific GPU (e.g. GPU index 0):
+```bash
+docker run --gpus '"device=0"' --rm --shm-size=8g ...
+```
+
+#### W&B inside Docker
+
+Set your API key once in your shell (get it from [wandb.ai/settings](https://wandb.ai/settings)):
+```bash
+export WANDB_API_KEY=your_key_here   # add to ~/.zshrc or ~/.bashrc to persist
+```
+
+Then pass it through to the container with `-e WANDB_API_KEY` — Docker forwards the value from your host environment automatically, no copy-pasting per command.
+
+To enable experiment tracking, also add these flags to the training command:
+```
+--track_experiment --experiment_group my-project --experiment_name run1 --wandb_user my_wandb_user
 ```
 
 ### Run training (ex.: CIFAR10, mobilenet_v3, CE loss):
 
+**Outside Docker** (conda/venv):
 ```
 python miyagi_trainer/train.py --resize_size 224 --train_datasets CIFAR10 --val_datasets CIFAR10 --backbone mobilenetv3_large_100
 ```
 
-That should download everything you need and start running. If you did `2` for sure you're interested in tracking this experiment. For that, set the following args:
+That should download everything you need and start running. To enable experiment tracking, add:
 
 ```
 --track_experiment --experiment_group miyagi-test --experiment_name test1 --wandb_user my_wandb_user
@@ -99,14 +143,36 @@ custom_dataset_folder
     │       file005.jpeg
     ...
 ```
-For reasons that should become clear, you need to chose a name for your custom dataset and put them into the `CUSTOM_DATASETS` dict in [datasets.py](https://github.com/gustavofuhr/miyagi_pytorch_trainer/blob/main/miyagi_trainer/datasets.py):
+
+It's always expected that you have a `train` and `val` folder as the primary subfolders in your path (check tree above).
+
+### Option A — pass the path directly (recommended)
+
+You can pass an absolute or relative path straight to `--train_datasets` / `--val_datasets` without touching any Python file:
+
+```
+--train_datasets /path/to/custom_dataset_folder --val_datasets /path/to/custom_dataset_folder
+```
+
+This is the easiest approach, especially when running inside Docker where you control the mount point.
+
+### Option B — register a name in datasets.py
+
+Add an entry to the `CUSTOM_DATASETS` dict in [datasets.py](https://github.com/gustavofuhr/miyagi_pytorch_trainer/blob/main/miyagi_trainer/datasets.py):
 
 ```
 CUSTOM_DATASETS = {
     "custom_dataset": "data/custom_dataset_folder/"
 }
 ```
-Then you can reference it by name. Is's always expected that you have a `train` and `val` folder as the primary subfolders in your path (check tree above). You also can combine multiples datasets using `+`, like this:
+
+Then reference it by name:
+
+```
+--train_datasets custom_dataset --val_datasets custom_dataset
+```
+
+You also can combine multiple datasets using `+` (paths and names can be mixed), like this:
 
 ```
 --train-datasets CIFAR10+CIFAR100 --val-datasets CIFAR10
@@ -193,6 +259,52 @@ wandb agent wandb_user/miyagi_pytorch_trainer/xxxxxx
 This example will run a train for all the options (grid search) that is specified in the yaml file. That should take a couple of days, but you end up with a very cool experimental set:
 
 ![Isn't that beautiful?](sweeps_cifar10.png)
+
+## Running sweeps inside Docker
+
+Docker makes it easy to run multiple sweep agents in parallel, each consuming experiments from the same sweep queue.
+
+**Step 1 — register the sweep** (run once, outside or inside Docker):
+
+```bash
+wandb sweep sweeps/cifar10_full_sweep.yaml
+# wandb will print the sweep ID, e.g.: wandb_user/miyagi_pytorch_trainer/abc12345
+```
+
+**Step 2 — start one agent per GPU.** Each `docker run` launches one agent that will pull experiments from the sweep queue until it's exhausted:
+
+```bash
+# Agent on GPU 0
+docker run --gpus '"device=0"' --rm --shm-size=8g \
+  -v /path/to/your/dataset:/workspace/data/my_dataset \
+  -v /path/to/save/models:/workspace/trained_models \
+  -e WANDB_API_KEY \
+  miyagi-trainer:cu121 \
+  wandb agent wandb_user/miyagi_pytorch_trainer/abc12345
+
+# Agent on GPU 1
+docker run --gpus '"device=1"' --rm --shm-size=8g \
+  -v /path/to/your/dataset:/workspace/data/my_dataset \
+  -v /path/to/save/models:/workspace/trained_models \
+  -e WANDB_API_KEY \
+  miyagi-trainer:cu121 \
+  wandb agent wandb_user/miyagi_pytorch_trainer/abc12345
+```
+
+Run as many agents as you have GPUs. They all connect to the same sweep ID and W&B coordinates who runs which experiment — no manual partitioning needed.
+
+If you want to run agents in the background (so you can close the terminal):
+```bash
+docker run --gpus '"device=0"' --rm -d --shm-size=8g \
+  --name sweep-agent-0 \
+  -v /path/to/your/dataset:/workspace/data/my_dataset \
+  -v /path/to/save/models:/workspace/trained_models \
+  -e WANDB_API_KEY \
+  miyagi-trainer:cu121 \
+  wandb agent wandb_user/miyagi_pytorch_trainer/abc12345
+```
+
+Monitor with `docker logs -f sweep-agent-0` or watch progress on the W&B sweep dashboard.
 
 ## To-do
 

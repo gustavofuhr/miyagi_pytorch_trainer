@@ -303,11 +303,6 @@ if __name__ == "__main__":
     parser.add_argument("--train_datasets", action='store', type=str, nargs="+", required=True)
     parser.add_argument("--val_datasets", action='store', type=str, nargs="+", required=True)
 
-    parser.add_argument("--train_dataset_dirs", action='store', type=str, nargs="+", default=None,
-                        help="(Optional) specify dataset dirs directly instead of using predefined names")
-    parser.add_argument("--val_dataset_dirs", action='store', type=str, nargs="+",
-                        help="(Optional) specify dataset dirs directly instead of using predefined names")
-    
     parser.add_argument("--filter_off_files_regex", type=str, default=None, 
                         help="Regex pattern to exclude files (e.g., 'bad_files|outliers'). "
                              "Matches against the full file path.")
@@ -357,7 +352,7 @@ if __name__ == "__main__":
     # options for model saving
     parser.add_argument("--save_best_model", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
-        "--save_on_best_metrics", type=str, nargs="+", default=["f1_score"],
+        "--save_on_best_metrics", type=str, nargs="+", default=["acc", "f1_score"],
         choices=["acc", "loss", "eer", "f1_score", "frr_at_far", "far_at_frr", "confusion_matrix", "per_class_accuracy", "score_histogram"],
         help="Save a separate model checkpoint whenever a new best is reached for any of these metrics"
     )
@@ -372,7 +367,7 @@ if __name__ == "__main__":
         "--metrics",
         type=str,
         nargs="+",
-        default=["acc", "eer", "per_class_accuracy"],
+        default=["acc", "f1_score"],
         choices=["acc", "eer", "frr_at_far", "far_at_frr", "f1_score", "confusion_matrix", "per_class_accuracy"],
         help="List of metrics to compute: eer, f1_score, confusion_matrix, per_class_accuracy"
     )
@@ -387,9 +382,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if (args.train_datasets is None) == (args.train_dataset_dirs is None):
-        parser.error("You must provide either --train_datasets OR --train_dataset_dirs (but not both).")
-    if (args.val_datasets is None) == (args.val_dataset_dirs is None):
-        parser.error("You must provide either --val_datasets OR --val_dataset_dirs (but not both).")
-        
     train(args)
