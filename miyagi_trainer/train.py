@@ -223,12 +223,20 @@ def train_model(model,
 def train(args):
     resize_size = int(args.resize_size) if args.resize_size is not None else None
 
-    train_transform, val_transform = augmentations.get_augmentations(resize_size, args.augmentation, args.resize_policy)
-    transformers = {
-        "train": train_transform,
-        "val": val_transform
-    }
-    print("val_transform", val_transform)
+    if args.resize_policy == "single_eye_crop":
+        left_train, left_val = augmentations.get_augmentations(resize_size, args.augmentation, "single_eye_crop_left")
+        right_train, right_val = augmentations.get_augmentations(resize_size, args.augmentation, "single_eye_crop_right")
+        transformers = {
+            "train": (left_train, right_train),
+            "val":   (left_val,  right_val),
+        }
+    else:
+        train_transform, val_transform = augmentations.get_augmentations(resize_size, args.augmentation, args.resize_policy)
+        transformers = {
+            "train": train_transform,
+            "val": val_transform
+        }
+    print("val_transform", transformers["val"])
 
 
     # NOTE: I'am enabling using + between dataset names because of sweeps which does not work with nargs
@@ -318,7 +326,7 @@ if __name__ == "__main__":
         "--resize_policy",
         type=str,
         default="resize_exact",
-        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only", "eye_region_crop_exact", "eye_region_crop_letterbox", "eye_region_crop_tight_exact", "eye_region_crop_tight_letterbox"],
+        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only", "eye_region_crop_exact", "eye_region_crop_letterbox", "eye_region_crop_tight_exact", "eye_region_crop_tight_letterbox", "single_eye_crop"],
         help=(
             "How to resize input images: "
             "'resize_then_center_crop' (keep aspect, center crop), "

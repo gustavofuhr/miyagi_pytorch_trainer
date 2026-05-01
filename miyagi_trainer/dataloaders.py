@@ -172,19 +172,39 @@ def get_dataset_loaders(dataset_names,
     for s in splits:
         split_datasets = []
         for ith_ds, ds_name in enumerate(dataset_names[s]):
-            if ds_name in dir(torchvision.datasets):
-                this_dataset = _get_pytorch_dataset(ds_name, s, transforms[s])
-            elif ds_name in CUSTOM_DATASETS.keys():
-                this_dataset = _get_image_folder_dataset(ds_name, s, transforms[s], filter_off_regex)
-            elif _is_path(ds_name):
-                resolved = os.path.abspath(ds_name)
-                this_dataset = _get_image_folder_dataset_from_path(resolved, s, transforms[s], filter_off_regex)
+            transform = transforms[s]
+            # single_eye_crop mode passes a (left_transform, right_transform) tuple;
+            # load the dataset twice (once per eye) so each image yields two samples.
+            if isinstance(transform, tuple):
+                for t in transform:
+                    if ds_name in dir(torchvision.datasets):
+                        split_datasets.append(_get_pytorch_dataset(ds_name, s, t))
+                    elif ds_name in CUSTOM_DATASETS.keys():
+                        split_datasets.append(_get_image_folder_dataset(ds_name, s, t, filter_off_regex))
+                    elif _is_path(ds_name):
+                        resolved = os.path.abspath(ds_name)
+                        split_datasets.append(_get_image_folder_dataset_from_path(resolved, s, t, filter_off_regex))
+                    else:
+                        raise ValueError(
+                            f"Dataset {ds_name!r} is not a torchvision built-in, not a key in CUSTOM_DATASETS, "
+                            f"and does not look like a filesystem path. "
+                            f"Pass an absolute path (/foo/bar) or a relative path (./foo/bar or foo/bar)."
+                        )
+                continue
             else:
-                raise ValueError(
-                    f"Dataset {ds_name!r} is not a torchvision built-in, not a key in CUSTOM_DATASETS, "
-                    f"and does not look like a filesystem path. "
-                    f"Pass an absolute path (/foo/bar) or a relative path (./foo/bar or foo/bar)."
-                )
+                if ds_name in dir(torchvision.datasets):
+                    this_dataset = _get_pytorch_dataset(ds_name, s, transform)
+                elif ds_name in CUSTOM_DATASETS.keys():
+                    this_dataset = _get_image_folder_dataset(ds_name, s, transform, filter_off_regex)
+                elif _is_path(ds_name):
+                    resolved = os.path.abspath(ds_name)
+                    this_dataset = _get_image_folder_dataset_from_path(resolved, s, transform, filter_off_regex)
+                else:
+                    raise ValueError(
+                        f"Dataset {ds_name!r} is not a torchvision built-in, not a key in CUSTOM_DATASETS, "
+                        f"and does not look like a filesystem path. "
+                        f"Pass an absolute path (/foo/bar) or a relative path (./foo/bar or foo/bar)."
+                    )
 
             split_datasets.append(this_dataset)
 
