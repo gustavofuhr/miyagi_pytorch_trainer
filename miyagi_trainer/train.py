@@ -37,7 +37,8 @@ def train_model(model,
                 save_on_best_metrics,
                 save_best_model_dir=None,
                 wandb_sweep_activated=False,
-                track_all_images=False):
+                track_all_images=False,
+                use_metric_loss=False):
     """
     Train a model given model params and dataset loaders
     """
@@ -129,8 +130,16 @@ def train_model(model,
                 # forward
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
-                    loss = loss_function(outputs, labels)
+
+                    if use_metric_loss:
+                        # outputs are embeddings; extract logits from the loss's classifier head
+                        logits = loss_function.get_logits(outputs)
+                        _, preds = torch.max(logits, 1)
+                        loss = loss_function(outputs, labels)
+                    else:
+                        logits = outputs
+                        _, preds = torch.max(logits, 1)
+                        loss = loss_function(logits, labels)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -140,12 +149,12 @@ def train_model(model,
                 # statistics
                 running_loss += loss.item()
 
-                epoch_logits.append(outputs.detach().cpu().numpy())
+                epoch_logits.append(logits.detach().cpu().numpy())
                 epoch_preds.append(preds.detach().cpu().numpy())
                 epoch_labels.append(labels.detach().cpu().numpy())
 
                 if is_binary:
-                    probs = torch.softmax(outputs, dim=1)  # probs for class 1
+                    probs = torch.softmax(logits, dim=1)  # probs for class 1
                     epoch_probs.append(probs.detach().cpu().numpy())
 
                 if track_experiment and track_images and not logged_images_once and phase == 'train':
@@ -230,6 +239,13 @@ def train(args):
             "train": (left_train, right_train),
             "val":   (left_val,  right_val),
         }
+    elif args.resize_policy == "single_eye_crop_464":
+        left_train, left_val = augmentations.get_augmentations(resize_size, args.augmentation, "single_eye_crop_left_464")
+        right_train, right_val = augmentations.get_augmentations(resize_size, args.augmentation, "single_eye_crop_right_464")
+        transformers = {
+            "train": (left_train, right_train),
+            "val":   (left_val,  right_val),
+        }
     else:
         train_transform, val_transform = augmentations.get_augmentations(resize_size, args.augmentation, args.resize_policy)
         transformers = {
@@ -255,20 +271,52 @@ def train(args):
         filter_off_regex=args.filter_off_files_regex 
     )
 
-    model = models.get_model(args.backbone, len(train_loader.dataset.classes),
-                                        not args.no_transfer_learning, args.freeze_all_but_last, args.drop_path_rate)
+    n_classes = len(train_loader.dataset.classes)
+
+    # Validate loss / embedding_size consistency
+    if losses.is_metric_loss(args.loss) and args.embedding_size is None:
+        raise ValueError(
+            f"Loss '{args.loss}' requires an embedding size. "
+            "Please set --embedding_size (e.g. --embedding_size 128)."
+        )
+    if not losses.is_metric_loss(args.loss) and args.embedding_size is not None:
+        print(f"Warning: --embedding_size={args.embedding_size} is ignored for loss '{args.loss}'. "
+              "It is only used with metric losses (arcface, cosface, admsoft).")
+
+    effective_embedding_size = args.embedding_size if losses.is_metric_loss(args.loss) else None
+    model = models.get_model(args.backbone, n_classes,
+                             not args.no_transfer_learning, args.freeze_all_but_last,
+                             args.drop_path_rate, embedding_size=effective_embedding_size)
     print(f"model {args.backbone}")
     # print(model)
 
-    optimizer = optimizers.get_optimizer(model, args.optimizer, args.weight_decay)
-    scheduler = schedulers.get_scheduler(optimizer, args, train_loader)
-
+    # Build loss before optimizer so metric loss parameters can be included
     if args.class_imbalance_strategy == "loss":
         class_weights = train_class_counts.sum() / (len(train_class_counts) * train_class_counts)
         class_weights = torch.tensor(class_weights, dtype=torch.float)
-        loss_function = losses.get_loss(args.loss, class_weights=class_weights.to(device))
+        loss_function = losses.get_loss(
+            args.loss, num_classes=n_classes, embedding_size=effective_embedding_size,
+            class_weights=class_weights.to(device),
+            arcface_margin=args.arcface_margin, arcface_scale=args.arcface_scale,
+            cosface_margin=args.cosface_margin, cosface_scale=args.cosface_scale,
+            admsoft_m_l=args.admsoft_m_l, admsoft_m_s=args.admsoft_m_s, admsoft_scale=args.admsoft_scale,
+        )
     else:
-        loss_function = losses.get_loss(args.loss)
+        loss_function = losses.get_loss(
+            args.loss, num_classes=n_classes, embedding_size=effective_embedding_size,
+            arcface_margin=args.arcface_margin, arcface_scale=args.arcface_scale,
+            cosface_margin=args.cosface_margin, cosface_scale=args.cosface_scale,
+            admsoft_m_l=args.admsoft_m_l, admsoft_m_s=args.admsoft_m_s, admsoft_scale=args.admsoft_scale,
+        )
+
+    if losses.is_metric_loss(args.loss):
+        loss_function = loss_function.to(device)
+        optimizer = optimizers.get_optimizer_with_extra_params(
+            model, loss_function, args.optimizer, args.weight_decay)
+    else:
+        optimizer = optimizers.get_optimizer(model, args.optimizer, args.weight_decay)
+
+    scheduler = schedulers.get_scheduler(optimizer, args, train_loader)
     
 
     def get_model_size(model):
@@ -292,7 +340,8 @@ def train(args):
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metrics, args.track_experiment,
                     args.track_images, args.save_best_model, args.save_on_best_metrics,
-                    args.save_best_model_dir, args.wandb_sweep_activated, args.track_all_images)
+                    args.save_best_model_dir, args.wandb_sweep_activated, args.track_all_images,
+                    use_metric_loss=losses.is_metric_loss(args.loss))
     
     if args.wandb_sweep_activated:
         wandb.finish()
@@ -326,7 +375,7 @@ if __name__ == "__main__":
         "--resize_policy",
         type=str,
         default="resize_exact",
-        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only", "eye_region_crop_exact", "eye_region_crop_letterbox", "eye_region_crop_tight_exact", "eye_region_crop_tight_letterbox", "single_eye_crop"],
+        choices=["resize_then_center_crop", "resize_exact", "resize_with_padding", "center_crop_only", "eye_region_crop_exact", "eye_region_crop_letterbox", "eye_region_crop_tight_exact", "eye_region_crop_tight_letterbox", "single_eye_crop", "single_eye_crop_464"],
         help=(
             "How to resize input images: "
             "'resize_then_center_crop' (keep aspect, center crop), "
@@ -382,8 +431,34 @@ if __name__ == "__main__":
     
     # options for losses
     parser.add_argument("--loss",  type=str, default="cross_entropy")
-    # some choices are "cross_entropy", "angular", "custom_anomaly", "cross_entropy_label_smoothing_0.1", etc.
+    # some choices are "cross_entropy", "angular", "custom_anomaly", "arcface", "cosface", "admsoft",
+    # "cross_entropy_label_smoothing_0.1", etc.
     parser.add_argument("--ce_loss_label_smoothing",  type=float, required=False, default=0.0)
+
+    # embedding size — required when using metric losses (arcface, cosface, admsoft)
+    parser.add_argument("--embedding_size", type=int, default=None,
+                        help="Output embedding dimension for metric losses (arcface/cosface/admsoft). "
+                             "Not needed for CE-based losses.")
+
+    # ArcFace hyperparameters (defaults from pytorch-metric-learning)
+    parser.add_argument("--arcface_margin", type=float, default=28.6,
+                        help="ArcFace angular margin in degrees (default: 28.6)")
+    parser.add_argument("--arcface_scale",  type=float, default=64,
+                        help="ArcFace scale factor s (default: 64)")
+
+    # CosFace / AM-Softmax hyperparameters (defaults from pytorch-metric-learning)
+    parser.add_argument("--cosface_margin", type=float, default=0.35,
+                        help="CosFace cosine margin (default: 0.35)")
+    parser.add_argument("--cosface_scale",  type=float, default=64,
+                        help="CosFace scale factor s (default: 64)")
+
+    # Dual-margin AdMSoftmax hyperparameters (defaults from patchnet)
+    parser.add_argument("--admsoft_m_l",   type=float, default=0.4,
+                        help="AdMSoftmax margin for live class (default: 0.4)")
+    parser.add_argument("--admsoft_m_s",   type=float, default=0.1,
+                        help="AdMSoftmax margin for spoof class (default: 0.1)")
+    parser.add_argument("--admsoft_scale", type=float, default=30.0,
+                        help="AdMSoftmax scale factor s (default: 30.0)")
 
     parser.add_argument("--scheduler", type=str, choices=["cosine", "onecycle"], default="cosine")
     parser.add_argument("--drop_path_rate", type=float, default=0.0)

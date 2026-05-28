@@ -114,6 +114,42 @@ def single_eye_crop_right(resize_size):
     ])
 
 
+class SingleEyeCropTransform464:
+    """Crops an 80×80 square around one eye from a 464×464 ArcFace-aligned face image.
+
+    For images where the face was normalized to 224×224 with a 120px border on each side.
+    Left eye center ≈ (197, 223),  Right eye center ≈ (267, 223).
+    Half-size: 40 px  →  80×80 px crop.
+    """
+    _EYE_CENTERS = {'left': (197, 223), 'right': (267, 223)}
+    HALF = 40
+
+    def __init__(self, side: str):
+        self._cx, self._cy = self._EYE_CENTERS[side]
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        return img.crop((
+            self._cx - self.HALF, self._cy - self.HALF,
+            self._cx + self.HALF, self._cy + self.HALF,
+        ))
+
+
+def single_eye_crop_left_464(resize_size):
+    """Left-eye 80×80 crop from 464×464 image → squish to resize_size×resize_size."""
+    return transforms.Compose([
+        SingleEyeCropTransform464('left'),
+        *resize_stretch(resize_size).transforms,
+    ])
+
+
+def single_eye_crop_right_464(resize_size):
+    """Right-eye 80×80 crop from 464×464 image → squish to resize_size×resize_size."""
+    return transforms.Compose([
+        SingleEyeCropTransform464('right'),
+        *resize_stretch(resize_size).transforms,
+    ])
+
+
 def eye_region_crop_exact(resize_size):
     """Loose eye crop → squish to resize_size×resize_size."""
     return transforms.Compose([
@@ -216,6 +252,8 @@ def get_augmentations(resize_size, augmentation_opt, resize_mode="resize_exact")
         "eye_region_crop_tight_letterbox": eye_region_crop_tight_letterbox,
         "single_eye_crop_left": single_eye_crop_left,
         "single_eye_crop_right": single_eye_crop_right,
+        "single_eye_crop_left_464": single_eye_crop_left_464,
+        "single_eye_crop_right_464": single_eye_crop_right_464,
     }
     resize_fn = resize_fns[resize_mode]
 
