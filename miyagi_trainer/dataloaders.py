@@ -13,6 +13,14 @@ from datasets import CUSTOM_DATASETS
 
 VALID_IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
 
+
+class ImageFolderWithPaths(torchvision.datasets.ImageFolder):
+    """ImageFolder that also returns the image file path as a third element."""
+    def __getitem__(self, index):
+        img, label = super().__getitem__(index)
+        path = self.samples[index][0]
+        return img, label, path
+
 def _get_pytorch_dataloders(dataset, batch_size, num_workers, balance_sampling = False):
     if balance_sampling:
         class_sample_count = torch.tensor([*dataset.class_sample_count.values()])
@@ -72,7 +80,7 @@ def _get_image_folder_dataset_from_path(root_path, split, transform, filter_off_
 
         is_valid_func = file_filter
 
-    return torchvision.datasets.ImageFolder(
+    return ImageFolderWithPaths(
         root=split_path,
         transform=transform,
         is_valid_file=is_valid_func,
@@ -110,10 +118,10 @@ def _get_image_folder_dataset(dataset_name, split, transform, filter_off_regex=N
         is_valid_func = file_filter
 
     # Pass is_valid_file. Note: extensions arg is ignored if is_valid_file is not None.
-    dataset = torchvision.datasets.ImageFolder(
+    dataset = ImageFolderWithPaths(
         root=root_path,
         transform=transform,
-        is_valid_file=is_valid_func 
+        is_valid_file=is_valid_func,
     )
 
     return dataset

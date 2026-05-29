@@ -6,6 +6,8 @@ from sklearn.metrics import roc_curve
 import numpy as np
 from sklearn.metrics import f1_score, confusion_matrix
 
+from ds_specs import get_image_prefix, PREFIX_TO_SPOOF_TYPE, SPOOF_TYPE_MAP
+
 
 softmax = nn.Softmax(dim=1)
 METRIC_GOALS = {
@@ -109,10 +111,8 @@ def compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits
         epoch_log[f"{phase}_eer"] = epoch_eer
 
     target_operating_points = {
-        "10": 0.10,
         "1": 0.01,
         "0_1": 0.001,
-        "0_01": 0.0001,
     }
 
     if "frr_at_far" in metrics_list and positive_scores is not None:
@@ -305,6 +305,54 @@ def compute_far_at_frrs(labels, scores, target_frrs):
     for name, target_frr in target_frrs.items():
         fa = np.interp(target_frr, frr[::-1], fpr[::-1], left=fpr[-1], right=fpr[0])
         result[name] = fa
+    return result
+
+
+def compute_far_per_spoof_type(labels, scores, paths,
+                               prefix_to_spoof_type=None,
+                               spoof_type_map=None,
+                               target_frrs=None,
+                               class_to_idx=None):
+    """
+    For each spoof type: take the subset (all live + that spoof type only) and
+    compute far_at_frr at each operating point independently, reusing compute_far_at_frrs.
+
+    labels: 0=spoof, 1=live
+    scores: higher = more likely live
+    paths: flat list of image file paths aligned with labels/scores
+
+    Returns dict like {"photo_far_at_frr_1": 5.2, "cutout_far_at_frr_1": 12.0, ...}
+    """
+    if prefix_to_spoof_type is None:
+        prefix_to_spoof_type = PREFIX_TO_SPOOF_TYPE
+    if spoof_type_map is None:
+        spoof_type_map = SPOOF_TYPE_MAP
+    if target_frrs is None:
+        target_frrs = {"1": 0.01, "0_1": 0.001}
+
+    labels = np.array(labels)
+    scores = np.array(scores)
+    live_class_idx = class_to_idx["live"] if class_to_idx and "live" in class_to_idx else 0
+    live_mask = labels == live_class_idx
+
+    sample_spoof_type = np.array([
+        prefix_to_spoof_type.get(get_image_prefix(p)) for p in paths
+    ])
+
+    inv_map = {v: k for k, v in spoof_type_map.items() if k != "live"}
+    result = {}
+
+    for type_int, type_name in inv_map.items():
+        type_mask = sample_spoof_type == type_int
+        if not type_mask.any():
+            continue
+        subset_mask = live_mask | type_mask
+        sub_labels = labels[subset_mask]
+        sub_scores = scores[subset_mask]
+        fars = compute_far_at_frrs(sub_labels, sub_scores, target_frrs)
+        for frr_name, far_val in fars.items():
+            result[f"{type_name}_far_at_frr_{frr_name}"] = 100.0 * far_val
+
     return result
 
 

@@ -18,10 +18,24 @@ import optimizers
 import schedulers
 import metrics
 import losses
+from PIL import Image as PILImage
+from ds_specs import PREFIX_TO_SPOOF_TYPE, SPOOF_TYPE_MAP, get_image_prefix
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Device:",device)
+
+def _make_image_grid(img_paths, n_cols=8, thumb_size=128):
+    imgs = [PILImage.open(p).convert("RGB").resize((thumb_size, thumb_size))
+            for p in img_paths]
+    n_cols = min(n_cols, len(imgs))
+    n_rows = (len(imgs) + n_cols - 1) // n_cols
+    grid = PILImage.new("RGB", (n_cols * thumb_size, n_rows * thumb_size))
+    for idx, img in enumerate(imgs):
+        col, row = idx % n_cols, idx // n_cols
+        grid.paste(img, (col * thumb_size, row * thumb_size))
+    return grid
+
 
 def train_model(model,
                 train_loader,
@@ -38,7 +52,9 @@ def train_model(model,
                 save_best_model_dir=None,
                 wandb_sweep_activated=False,
                 track_all_images=False,
-                use_metric_loss=False):
+                use_metric_loss=False,
+                include_ds_specs_metrics=False,
+                save_on_best_spoof_types=False):
     """
     Train a model given model params and dataset loaders
     """
@@ -57,6 +73,8 @@ def train_model(model,
     since = time.time()
 
     best_metrics = metrics.init_metrics_best(metrics_list)
+    best_model_paths = {}   # metric_key -> last saved checkpoint path (deleted when superseded)
+    best_spoof_far = {}     # spoof_type_name -> best far_at_frr_1 value seen so far
     dataloaders = {
         "train": train_loader,
         "val": val_loader
@@ -107,6 +125,7 @@ def train_model(model,
         # Each epoch has a training and validation phase
         for phase in phases:
             epoch_preds, epoch_labels, epoch_logits = [], [], []
+            epoch_paths = []
             if is_binary:
                 epoch_probs = []
 
@@ -117,7 +136,7 @@ def train_model(model,
 
             running_loss = 0.0
             # Iterate over data in batches
-            for batch_idx, (inputs, labels) in enumerate(tqdm(dataloaders[phase])):
+            for batch_idx, (inputs, labels, paths) in enumerate(tqdm(dataloaders[phase])):
                 # TODO: needs to cast to float.
                 inputs = inputs.float().to(device)
 
@@ -152,6 +171,8 @@ def train_model(model,
                 epoch_logits.append(logits.detach().cpu().numpy())
                 epoch_preds.append(preds.detach().cpu().numpy())
                 epoch_labels.append(labels.detach().cpu().numpy())
+                if phase == "val":
+                    epoch_paths.extend(paths)
 
                 if is_binary:
                     probs = torch.softmax(logits, dim=1)  # probs for class 1
@@ -171,8 +192,57 @@ def train_model(model,
             epoch_loss = running_loss/len(dataloaders[phase])
             epoch_log[f"{phase}_loss"] = epoch_loss
 
-            # store all other metrics 
+            # store all other metrics
             epoch_log.update(metrics.compute_metrics(metrics_list, phase, epoch_labels, epoch_preds, epoch_logits, class_names=class_names))
+
+            if phase == "val" and include_ds_specs_metrics and epoch_logits:
+                flat_logits = np.concatenate(epoch_logits)
+                flat_scores = torch.softmax(torch.from_numpy(flat_logits), dim=1).numpy()
+                if flat_scores.shape[1] >= 2:
+                    positive_scores = flat_scores[:, 1]
+                    spoof_metrics = metrics.compute_far_per_spoof_type(
+                        np.concatenate(epoch_labels), positive_scores, epoch_paths,
+                        class_to_idx=dataloaders["val"].dataset.join_class_to_idx
+                    )
+                    epoch_log.update({f"val_{k}": v for k, v in spoof_metrics.items()})
+                    if spoof_metrics:
+                        print("Per-spoof-type FAR@FRR: " +
+                              " | ".join(f"{k}: {v:.2f}%" for k, v in sorted(spoof_metrics.items()) if k.endswith("_1")))
+
+                    if save_best_model and save_on_best_spoof_types:
+                        for key, val in spoof_metrics.items():
+                            if not key.endswith("_far_at_frr_1"):
+                                continue
+                            spoof_name = key[: -len("_far_at_frr_1")]
+                            if spoof_name not in best_spoof_far or val < best_spoof_far[spoof_name]:
+                                best_spoof_far[spoof_name] = val
+                                print(f"val_{key} new best ({val:.2f}%), saving model.")
+                                new_path = os.path.join(
+                                    SAVE_BEST_MODEL_DIR,
+                                    f"{model_name}{run_suffix}_best_{spoof_name}_far_{val:.2f}.pt"
+                                )
+                                old_path = best_model_paths.get(f"{spoof_name}_far")
+                                if old_path and os.path.exists(old_path):
+                                    os.remove(old_path)
+                                torch.save(model, new_path)
+                                best_model_paths[f"{spoof_name}_far"] = new_path
+                        if track_experiment:
+                            for spoof_name, best_val in best_spoof_far.items():
+                                wandb.run.summary[f"best_val_{spoof_name}_far_at_frr_1"] = best_val
+
+                    if epoch == 0 and track_experiment and track_images:
+                        inv_map = {v: k for k, v in SPOOF_TYPE_MAP.items()}
+                        type_paths = {name: [] for name in SPOOF_TYPE_MAP}
+                        for p in epoch_paths:
+                            t = PREFIX_TO_SPOOF_TYPE.get(get_image_prefix(p))
+                            if t is not None:
+                                type_paths[inv_map[t]].append(p)
+                        for type_name, img_paths in type_paths.items():
+                            if not img_paths:
+                                continue
+                            grid = _make_image_grid(img_paths[:32], n_cols=8, thumb_size=128)
+                            epoch_log[f"val_sample_grid_{type_name}"] = wandb.Image(grid, caption=type_name)
+
             print(f'{phase} Loss: {epoch_loss:.4f} |', end=" ")
 
             # compute best metrics so far
@@ -183,9 +253,14 @@ def train_model(model,
                 saved_any = False
                 for metric in save_on_best_metrics:
                     if f"{phase}_{metric}" in metrics_w_new_best:
-                        print(f"Metric {phase}_{metric} got new best, saving model.")
-                        model_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_best_{metric}.pt")
-                        torch.save(model, model_path)
+                        metric_val = epoch_log.get(f"{phase}_{metric}", 0.0)
+                        new_path = os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_best_{metric}_{metric_val:.2f}.pt")
+                        old_path = best_model_paths.get(metric)
+                        if old_path and os.path.exists(old_path):
+                            os.remove(old_path)
+                        print(f"Metric {phase}_{metric} new best ({metric_val:.2f}), saving model.")
+                        torch.save(model, new_path)
+                        best_model_paths[metric] = new_path
                         saved_any = True
                 if saved_any:
                     with open(os.path.join(SAVE_BEST_MODEL_DIR, f"{model_name}{run_suffix}_class_to_idx.json"), "w") as f:
@@ -337,11 +412,17 @@ def train(args):
             wandb.init(project=args.experiment_group, name=args.experiment_name, entity=args.wandb_user, config=args)
         wandb.config.model_size_params = model_size_params
 
+    save_on_best_spoof_types = args.save_on_best_spoof_types
+    if save_on_best_spoof_types is None:
+        save_on_best_spoof_types = args.include_ds_specs_metrics
+
     train_model(model, train_loader, val_loader, optimizer, scheduler, loss_function,
                     int(args.n_epochs), args.metrics, args.track_experiment,
                     args.track_images, args.save_best_model, args.save_on_best_metrics,
                     args.save_best_model_dir, args.wandb_sweep_activated, args.track_all_images,
-                    use_metric_loss=losses.is_metric_loss(args.loss))
+                    use_metric_loss=losses.is_metric_loss(args.loss),
+                    include_ds_specs_metrics=args.include_ds_specs_metrics,
+                    save_on_best_spoof_types=save_on_best_spoof_types)
     
     if args.wandb_sweep_activated:
         wandb.finish()
@@ -462,6 +543,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--scheduler", type=str, choices=["cosine", "onecycle"], default="cosine")
     parser.add_argument("--drop_path_rate", type=float, default=0.0)
+
+    parser.add_argument("--include_ds_specs_metrics", action="store_true", default=False,
+                        help="Compute and log per-spoof-type FAR@FRR during val using ds_specs.py mappings.")
+    parser.add_argument("--save_on_best_spoof_types", action=argparse.BooleanOptionalAction, default=None,
+                        help="Save a checkpoint per spoof type at its best far_at_frr_1. "
+                             "Defaults to True when --include_ds_specs_metrics is set.")
 
     args = parser.parse_args()
 
